@@ -5,6 +5,7 @@ add_executable(cpu_scheduler_tests
     test_sjf_scheduler.cpp
     test_srtf_scheduler.cpp
     test_rr_scheduler.cpp
+    test_priority_scheduler.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests

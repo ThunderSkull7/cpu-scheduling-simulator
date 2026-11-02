@@ -27,6 +27,7 @@ add_library(cpu_scheduler_lib
     src/sjf_scheduler.cpp
     src/srtf_scheduler.cpp
     src/rr_scheduler.cpp
+    src/priority_scheduler.cpp
     src/gantt_chart.cpp
 )
 

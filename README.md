@@ -4,9 +4,9 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 5 — Round Robin (RR) Implementation
+## Current Status: Batch 6 — Priority Scheduling Implementation
 
-- [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations.
+- [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
 - [x] **Process Execution State**: Decoupled dynamic tracking (`ProcessState`) preserving original workload parameters.
 - [x] **Execution Timeline**: Complete execution history (`ExecutionSegment`) with explicit CPU idle tracking.
@@ -14,10 +14,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Non-Preemptive SJF Scheduling Engine**: Shortest Job First scheduler (`SjfScheduler`) with dynamic ready queue selection and three-tier deterministic tie-breaking.
 - [x] **Preemptive SRTF Scheduling Engine**: Shortest Remaining Time First scheduler (`SrtfScheduler`) with event-driven simulation, preemption on strictly smaller remaining burst, and deterministic tie-breaking.
 - [x] **Preemptive Round Robin (RR) Scheduling Engine**: Round Robin scheduler (`RrScheduler`) with configurable time quantum, strict FIFO queue rotation, simultaneous arrival handling, timeline normalization, and overflow protection.
+- [x] **Non-Preemptive Priority Scheduling Engine**: Priority scheduler (`NonPreemptivePriorityScheduler`) selecting highest-priority ready processes (smaller numerical value = higher priority) with stable tie-breaking.
+- [x] **Preemptive Priority Scheduling Engine**: Priority scheduler (`PreemptivePriorityScheduler`) featuring event-driven simulation, preemption on strictly higher priority (`new_proc.priority < running_proc.priority`), equal-priority non-preemption, and preserved remaining burst times.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **226 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, and Round Robin rotations.
-- [ ] **Priority Scheduling** *(Planned - Batch 6)*
+- [x] **Unit Testing Suite**: **294 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, and Priority scheduling variants.
 - [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 7)*
 
 ---
@@ -78,76 +79,88 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - **No Unnecessary Context Switches (Normalization)**:
   - If a process finishes its quantum and no other process is waiting in the ready queue, it retains the CPU.
   - Consecutive execution slices for the same process are normalized into a single continuous timeline segment.
-- **Complexity**: $O(n \log n)$ time and $O(n)$ space.
+- **Complexity**: $O(n \log n + \frac{\text{Total Burst}}{q})$ time and $O(n + \frac{\text{Total Burst}}{q})$ timeline slice space.
 
 ---
 
-## Comparison: FCFS vs. SJF vs. SRTF vs. RR
+### 5. Non-Preemptive Priority Scheduling
+
+- **Philosophy**: Allocates the CPU to the ready process with the highest priority. Once dispatched, the process runs to completion uninterrupted.
+- **Priority Direction Convention**:
+  - **Smaller numerical value represents higher scheduling priority**.
+  - Example: Priority 1 has higher priority than Priority 2; Priority -5 has higher priority than Priority 0.
+  - Safe relational comparisons (`>`) are performed directly on integer values without subtraction, eliminating signed overflow risk.
+- **Deterministic Tie-Breaking Rules**:
+  1. **Primary**: Highest priority (smallest numerical value).
+  2. **Secondary**: Earlier arrival time.
+  3. **Tertiary**: Original input workload sequence index.
+- **Complexity**: $O(n \log n)$ time and $O(n)$ space utilizing a min-priority queue.
+
+---
+
+### 6. Preemptive Priority Scheduling
+
+- **Philosophy**: Preemptive variant of Priority Scheduling. The CPU is allocated to the highest-priority ready process at all times.
+- **Strict Preemption Rule**:
+  - A newly arriving process preempts the currently running process **if and only if** it has a **strictly higher priority**:
+    $$\text{new\_process.priority} < \text{running\_process.priority}$$
+  - **Equal-Priority Arrivals**: Do **not** preempt the running process. The running process retains the CPU.
+  - **Lower-Priority Arrivals**: Do **not** preempt the running process.
+- **Preservation of Remaining Time**:
+  - When preempted, the active process's remaining burst time is preserved and it returns to the ready pool.
+- **Deterministic Tie-Breaking (Ready Pool)**:
+  1. Highest priority (smallest numerical value).
+  2. Earlier arrival time.
+  3. Original input index.
+- **Event-Driven Simulation Engine**:
+  - Jumps directly between discrete scheduling events: next arrival or active process completion.
+  - Bounded by at most $n$ arrivals and at most $n$ preemptions, guaranteeing an exact time complexity of $O(n \log n)$ and auxiliary space of $O(n)$ (at most $2n - 1$ timeline segments).
+- **Starvation Limitation & Aging**:
+  - Fixed-priority scheduling can lead to indefinite starvation of lower-priority processes if higher-priority work continuously arrives.
+  - Priority aging (gradually elevating the priority of long-waiting processes) will be implemented in a subsequent batch.
+
+---
+
+## Comparison: FCFS vs. SJF vs. SRTF vs. RR vs. Priority
 
 Consider the following benchmark workload:
 
 | Process | Arrival Time | Burst Time | Priority |
 | :--- | :---: | :---: | :---: |
-| **P1** | 0 | 7 | 0 |
-| **P2** | 2 | 4 | 0 |
-| **P3** | 4 | 1 | 0 |
-| **P4** | 5 | 4 | 0 |
+| **P1** | 0 | 7 | 3 |
+| **P2** | 2 | 4 | 1 |
+| **P3** | 4 | 1 | 2 |
+| **P4** | 5 | 4 | 1 |
 
-### 1. FCFS Execution
-- **Order**: P1 (0–7) $\rightarrow$ P2 (7–11) $\rightarrow$ P3 (11–12) $\rightarrow$ P4 (12–16)
-- **Gantt Chart**:
-  ```text
-  | P1 | P2 | P3 | P4 |
-  0    7    11   12   16
-  ```
-- **Average Waiting Time**: **4.75**
-- **Average Turnaround Time**: **8.75**
+### Execution Breakdown:
 
-### 2. SJF (Non-Preemptive) Execution
-- **Order**: P1 (0–7) $\rightarrow$ P3 (7–8) $\rightarrow$ P2 (8–12) $\rightarrow$ P4 (12–16)
-- **Gantt Chart**:
-  ```text
-  | P1 | P3 | P2 | P4 |
-  0    7    8    12   16
-  ```
-- **Average Waiting Time**: **4.00**
-- **Average Turnaround Time**: **8.00**
-
-### 3. SRTF (Preemptive) Execution
-- **Order**: P1 (0–2) $\rightarrow$ P2 (2–4) $\rightarrow$ P3 (4–5) $\rightarrow$ P2 (5–7) $\rightarrow$ P4 (7–11) $\rightarrow$ P1 (11–16)
-- **Gantt Chart**:
-  ```text
-  | P1 | P2 | P3 | P2 | P4 | P1 |
-  0    2    4    5    7    11   16
-  ```
-- **Average Waiting Time**: **3.00**
-- **Average Turnaround Time**: **7.00**
-
-### 4. Round Robin (RR, Quantum = 2) Execution
-- **Order**: P1 (0–2) $\rightarrow$ P2 (2–4) $\rightarrow$ P1 (4–6) $\rightarrow$ P3 (6–7) $\rightarrow$ P2 (7–9) $\rightarrow$ P4 (9–11) $\rightarrow$ P1 (11–13) $\rightarrow$ P4 (13–15) $\rightarrow$ P1 (15–16)
-- **Gantt Chart**:
-  ```text
-  | P1 | P2 | P1 | P3 | P2 | P4 | P1 | P4 | P1 |
-  0    2    4    6    7    9    11   13   15   16
-  ```
-- **Average Waiting Time**: **5.00**
-- **Average Turnaround Time**: **9.00**
+1. **FCFS**:
+   - Order: P1(0-7) $\rightarrow$ P2(7-11) $\rightarrow$ P3(11-12) $\rightarrow$ P4(12-16)
+   - Avg Waiting Time: 4.75 | Avg Turnaround Time: 8.75 | CPU Utilization: 100.0%
+2. **SJF (Non-Preemptive)**:
+   - Order: P1(0-7) $\rightarrow$ P3(7-8) $\rightarrow$ P2(8-12) $\rightarrow$ P4(12-16)
+   - Avg Waiting Time: 4.00 | Avg Turnaround Time: 8.00 | CPU Utilization: 100.0%
+3. **SRTF (Preemptive)**:
+   - Order: P1(0-2) $\rightarrow$ P2(2-4) $\rightarrow$ P3(4-5) $\rightarrow$ P2(5-7) $\rightarrow$ P4(7-11) $\rightarrow$ P1(11-16)
+   - Avg Waiting Time: 3.00 | Avg Turnaround Time: 7.00 | CPU Utilization: 100.0%
+4. **Round Robin (q=2)**:
+   - Order: P1(0-2) $\rightarrow$ P2(2-4) $\rightarrow$ P1(4-6) $\rightarrow$ P3(6-7) $\rightarrow$ P2(7-9) $\rightarrow$ P4(9-11) $\rightarrow$ P1(11-13) $\rightarrow$ P4(13-15) $\rightarrow$ P1(15-16)
+   - Avg Waiting Time: 5.00 | Avg Turnaround Time: 9.00 | CPU Utilization: 100.0%
+5. **Non-Preemptive Priority**:
+   - Order: P1(0-7) $\rightarrow$ P2(7-11) $\rightarrow$ P4(11-15) $\rightarrow$ P3(15-16)
+   - Avg Waiting Time: 5.50 | Avg Turnaround Time: 9.50 | CPU Utilization: 100.0%
+6. **Preemptive Priority**:
+   - Order: P1(0-2) $\rightarrow$ P2(2-6) $\rightarrow$ P4(6-10) $\rightarrow$ P3(10-11) $\rightarrow$ P1(11-16)
+   - Avg Waiting Time: 4.00 | Avg Turnaround Time: 8.00 | CPU Utilization: 100.0%
 
 ---
 
-## Scheduling Metrics Definitions
+## Core Metrics Definitions
 
-For each process $i$:
-
-| Metric | Formula | Description |
-| :--- | :--- | :--- |
-| **Completion Time ($CT$)** | Timestamp at process termination | Simulation clock time when remaining execution reaches zero. |
-| **Turnaround Time ($TAT$)** | $Completion\ Time - Arrival\ Time$ | Total elapsed duration from process arrival to termination. |
-| **Waiting Time ($WT$)** | $Turnaround\ Time - Burst\ Time$ | Total cumulative duration the process waited in the ready queue. |
-| **Response Time ($RT$)** | $First\ Start\ Time - Arrival\ Time$ | Duration from arrival until initial CPU allocation. |
-
-### Aggregate Performance Metrics
-
+- **Completion Time ($CT$)**: Timestamp at which a process finishes its execution.
+- **Turnaround Time ($TAT$)**: Total elapsed time from arrival to completion ($TAT = CT - AT$).
+- **Waiting Time ($WT$)**: Total time spent waiting in the ready queue ($WT = TAT - BT$).
+- **Response Time ($RT$)**: Duration from arrival until the first time the process receives CPU execution ($RT = ST_{\text{first}} - AT$).
 - **Average Turnaround Time**: $\text{Avg TAT} = \frac{1}{N} \sum_{i=1}^N TAT_i$
 - **Average Waiting Time**: $\text{Avg WT} = \frac{1}{N} \sum_{i=1}^N WT_i$
 - **Average Response Time**: $\text{Avg RT} = \frac{1}{N} \sum_{i=1}^N RT_i$
@@ -205,10 +218,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (226 tests)
+# Debug test suite (294 tests)
 ctest --preset debug-test
 
-# Release test suite (226 tests)
+# Release test suite (294 tests)
 ctest --preset release-test
 ```
 
@@ -235,6 +248,7 @@ CPU Scheduling Simulator/
 ├── .gitignore                  # Git ignore rules for build artifacts and IDE files
 ├── README.md                   # Project overview, algorithm guide, and instructions
 ├── BATCH_5_IMPLEMENTATION_REPORT.md # Batch 5 implementation report
+├── BATCH_6_IMPLEMENTATION_REPORT.md # Batch 6 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -247,6 +261,7 @@ CPU Scheduling Simulator/
 │       ├── sjf_scheduler.hpp    # Non-preemptive SJF scheduling engine
 │       ├── srtf_scheduler.hpp   # Preemptive SRTF scheduling engine
 │       ├── rr_scheduler.hpp     # Preemptive Round Robin scheduling engine
+│       ├── priority_scheduler.hpp# Priority scheduling engine (Non-Preemptive & Preemptive)
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -259,6 +274,7 @@ CPU Scheduling Simulator/
 │   ├── sjf_scheduler.cpp
 │   ├── srtf_scheduler.cpp
 │   ├── rr_scheduler.cpp
+│   ├── priority_scheduler.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -268,12 +284,13 @@ CPU Scheduling Simulator/
 │   ├── test_fcfs_scheduler.cpp # Tests for FCFS scheduling engine (34 tests)
 │   ├── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
 │   ├── test_srtf_scheduler.cpp # Tests for SRTF scheduling engine (63 tests)
-│   └── test_rr_scheduler.cpp   # Tests for Round Robin scheduling engine (54 tests)
+│   ├── test_rr_scheduler.cpp   # Tests for Round Robin scheduling engine (54 tests)
+│   └── test_priority_scheduler.cpp # Tests for Priority scheduling engines (68 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation
 │
 └── examples/
     ├── CMakeLists.txt          # Example runner target
-    └── basic_usage.cpp         # Demonstrates FCFS vs SJF vs SRTF vs RR comparison
+    └── basic_usage.cpp         # Demonstrates all 6 algorithms side-by-side
 ```

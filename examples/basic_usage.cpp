@@ -1,5 +1,6 @@
 #include "cpu_scheduler/fcfs_scheduler.hpp"
 #include "cpu_scheduler/gantt_chart.hpp"
+#include "cpu_scheduler/priority_scheduler.hpp"
 #include "cpu_scheduler/process.hpp"
 #include "cpu_scheduler/rr_scheduler.hpp"
 #include "cpu_scheduler/sjf_scheduler.hpp"
@@ -38,19 +39,21 @@ void display_schedule_result(std::string_view algorithm_name,
               << std::setw(6)  << "PID"
               << std::setw(10) << "Arrival"
               << std::setw(8)  << "Burst"
+              << std::setw(10) << "Priority"
               << std::setw(8)  << "Start"
               << std::setw(12) << "Completion"
               << std::setw(12) << "Turnaround"
               << std::setw(10) << "Waiting"
               << std::setw(10) << "Response"
               << "\n";
-    std::cout << std::string(76, '-') << "\n";
+    std::cout << std::string(86, '-') << "\n";
 
     for (const auto& ps : result.processes()) {
         std::cout << std::left
                   << std::setw(6)  << ps.process_id
                   << std::setw(10) << ps.arrival_time
                   << std::setw(8)  << ps.burst_time
+                  << std::setw(10) << ps.priority
                   << std::setw(8)  << ps.start_time.value_or(-1)
                   << std::setw(12) << ps.completion_time
                   << std::setw(12) << ps.turnaround_time
@@ -72,15 +75,15 @@ int main() {
     using namespace cpu_scheduler;
 
     std::cout << "=========================================================\n";
-    std::cout << "  CPU Scheduling Simulator — FCFS vs SJF vs SRTF vs RR   \n";
+    std::cout << "  CPU Scheduling Simulator — Comprehensive Comparison    \n";
     std::cout << "=========================================================\n\n";
 
-    // Standard comparison workload from Batch 3 specification
+    // Standard comparison workload with priorities assigned (smaller value = higher priority)
     const std::vector<Process> workload = {
-        Process("P1", 0, 7),
-        Process("P2", 2, 4),
-        Process("P3", 4, 1),
-        Process("P4", 5, 4)
+        Process("P1", 0, 7, 3),
+        Process("P2", 2, 4, 1),
+        Process("P3", 4, 1, 2),
+        Process("P4", 5, 4, 1)
     };
 
     std::cout << "Input Workload:\n";
@@ -120,6 +123,22 @@ int main() {
         display_schedule_result("Round Robin (RR, Quantum = 2)", rr_outcome.value());
     } else {
         std::cerr << "Round Robin failed: " << rr_outcome.error_message() << "\n";
+    }
+
+    // 5. Run Non-Preemptive Priority Scheduling
+    const auto np_prio_outcome = NonPreemptivePriorityScheduler::run(workload);
+    if (np_prio_outcome.has_value()) {
+        display_schedule_result("Non-Preemptive Priority Scheduling", np_prio_outcome.value());
+    } else {
+        std::cerr << "Non-Preemptive Priority failed: " << np_prio_outcome.error_message() << "\n";
+    }
+
+    // 6. Run Preemptive Priority Scheduling
+    const auto p_prio_outcome = PreemptivePriorityScheduler::run(workload);
+    if (p_prio_outcome.has_value()) {
+        display_schedule_result("Preemptive Priority Scheduling", p_prio_outcome.value());
+    } else {
+        std::cerr << "Preemptive Priority failed: " << p_prio_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";

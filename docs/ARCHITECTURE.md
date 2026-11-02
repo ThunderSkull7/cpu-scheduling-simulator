@@ -1,6 +1,6 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, SRTF, and Round Robin scheduling engines, and planned future algorithm extensions.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, SRTF, Round Robin, and Priority scheduling engines, and planned future algorithm extensions.
 
 ---
 
@@ -20,20 +20,22 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2, 3, 4, & 5 Implemented)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-6 Implemented)"]
         ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
         ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
         ValidationResult -->|Valid| Rr["RrScheduler\n(Preemptive Round Robin)"]
-        Fcfs & Sjf & Srtf & Rr --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
-        Fcfs & Sjf & Srtf & Rr --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+        ValidationResult -->|Valid| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
+        ValidationResult -->|Valid| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
     subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
         Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Batch 2, 3, 4, & 5)"]
+    subgraph PresentationLayer["4. Presentation Layer (Batches 2-6)"]
         SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
         SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
     end
@@ -49,10 +51,11 @@ flowchart TD
   - `id`: Unique identifier (`std::string`).
   - `arrival_time`: Point in simulation time when the process enters the system (`Time = std::int64_t`).
   - `burst_time`: Total CPU execution time required (`Time = std::int64_t`).
-  - `priority`: Static scheduling priority (`int`).
+  - `priority`: Static scheduling priority (`int`, smaller numerical value represents higher priority).
 - **Invariants & Design Constraints**:
   - The model does not contain mutable simulation fields.
   - The original burst time is preserved and never modified during simulation.
+  - Zero and negative priorities are fully valid.
 
 ### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`) — **Implemented (Batch 1)**
 - **Location**: `include/cpu_scheduler/process_validator.hpp`
@@ -91,9 +94,11 @@ flowchart TD
   - `start_time`: Simulation start timestamp.
   - `end_time`: Simulation completion timestamp.
   - `duration()`: Convenience helper ($end\_time - start\_time$).
+  - `is_idle()`: Predicate checking whether the segment represents CPU idle.
+  - `is_process()`: Predicate checking whether the segment represents process execution.
 - **Rules**:
   - CPU idle intervals are recorded explicitly (`SegmentType::Idle`).
-  - Zero-length idle intervals are prohibited (e.g., when a process arrives at the exact time the previous finishes).
+  - Zero-length intervals are prohibited.
   - Multiple execution segments for a single process are naturally supported when preemption occurs.
 
 ### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`) — **Implemented (Batch 2)**
@@ -149,32 +154,52 @@ flowchart TD
   - Jumps directly between discrete scheduling events (process arrivals and slice completions).
   - Time complexity: $O(n \log n)$ where $n$ is the number of processes.
   - Space complexity: $O(n)$.
-- **Response Time & Waiting Time Invariants**:
-  - Response time is recorded strictly at the initial CPU execution timestamp ($RT = \text{First Start Time} - \text{Arrival Time}$)$, remaining constant across subsequent preemptions.
-  - Total waiting time covers all intervals spent in the ready queue ($WT = TAT - BT$).
 
 ### 2.9 Round Robin Scheduler (`cpu_scheduler::RrScheduler`) — **Implemented (Batch 5)**
 - **Location**: `include/cpu_scheduler/rr_scheduler.hpp`
 - **Role**: Implements preemptive Round Robin (RR) scheduling with a configurable time quantum.
 - **Queue Semantics & Quantum Expiration**:
   - Maintains a strict FIFO ready queue.
-  - Each process executes for at most the positive time quantum: $\text{slice} = \min(q, \text{remaining\_time})$.
+  - Each process executes for at most the positive time quantum: $\text{slice} = \min(q, \text{remaining\_burst})$.
   - When a quantum expires, any processes arriving at that timestamp are admitted into the ready queue **before** the preempted process is requeued.
   - If a process finishes its execution, it is permanently marked completed and never requeued.
 - **Timeline Normalization**:
   - If a process finishes its quantum and no competing process is ready, it retains the CPU.
-  - Consecutive segments for the same process are normalized into a continuous execution segment, avoiding artificial timeline fragments.
-- **Complexity**: $O(n \log n)$ time and $O(n)$ space.
+  - Consecutive execution slices for the same process are normalized into a continuous execution segment, avoiding artificial timeline fragments.
+- **Complexity**: $O(n \log n + \frac{\text{Total Burst}}{q})$ time and $O(n + \frac{\text{Total Burst}}{q})$ timeline segment space.
 
-### 2.10 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.10 Priority Schedulers (`cpu_scheduler::NonPreemptivePriorityScheduler` & `PreemptivePriorityScheduler`) — **Implemented (Batch 6)**
+- **Location**: `include/cpu_scheduler/priority_scheduler.hpp`, `src/priority_scheduler.cpp`
+- **Role**: Implements both non-preemptive and preemptive priority-based scheduling.
+- **Priority Direction**:
+  - Smaller numerical priority value indicates strictly higher scheduling priority ($1 > 2$, $-5 > 0$).
+  - Relational comparisons (`>`) are used directly without subtractions, avoiding signed integer overflow.
+- **Deterministic Tie-Breaking Rules**:
+  1. Highest priority (smallest numerical value).
+  2. Earlier arrival time.
+  3. Original input index.
+- **Non-Preemptive Priority Scheduler**:
+  - Admitted ready processes are ordered by priority. The highest-priority ready process executes to completion uninterrupted.
+  - Complexity: $O(n \log n)$ time, $O(n)$ space.
+- **Preemptive Priority Scheduler**:
+  - Event-driven discrete simulation jumping between arrivals and completions.
+  - Preemption Rule: The active process is preempted **if and only if** a newly arrived process has a **strictly higher priority** (`new_proc.priority < running_proc.priority`).
+  - Equal-priority arrivals do not preempt the running process.
+  - Lower-priority arrivals do not preempt the running process.
+  - Preempted processes return to the ready pool with their remaining burst time preserved.
+  - Number of preemptions is bounded by $n$, yielding an exact time complexity of $O(n \log n)$ and auxiliary space of $O(n)$ (at most $2n - 1$ timeline segments).
+- **Starvation Limitation & Aging Considerations**:
+  - Fixed-priority scheduling inherently suffers from starvation of lower-priority processes when higher-priority processes arrive continuously.
+  - Priority aging (gradually incrementing priority of waiting processes) is intentionally out of scope for Batch 6 and will be implemented in future batches.
+
+### 2.11 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
 - **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 6+)
+## 3. Future Scheduling Algorithms (Planned for Batches 7+)
 
 The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
-- **Priority Scheduling**: Preemptive and non-preemptive selection using process priority integers.
-- **Multi-Level Queue / Feedback Queue**: Configurable priority queues with feedback aging.
+- **Multi-Level Queue / Multi-Level Feedback Queue (MLFQ)**: Configurable multi-tier priority queues with dynamic feedback aging.
