@@ -24,6 +24,7 @@ add_library(cpu_scheduler_lib
     src/execution_segment.cpp
     src/scheduling_result.cpp
     src/fcfs_scheduler.cpp
+    src/sjf_scheduler.cpp
     src/gantt_chart.cpp
 )
 

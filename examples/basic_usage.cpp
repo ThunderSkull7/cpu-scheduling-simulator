@@ -1,48 +1,37 @@
 #include "cpu_scheduler/fcfs_scheduler.hpp"
 #include "cpu_scheduler/gantt_chart.hpp"
 #include "cpu_scheduler/process.hpp"
-#include "cpu_scheduler/process_validator.hpp"
+#include "cpu_scheduler/sjf_scheduler.hpp"
 
 #include <iomanip>
 #include <iostream>
 #include <vector>
 
-int main() {
-    using namespace cpu_scheduler;
+namespace {
 
-    std::cout << "=========================================================\n";
-    std::cout << "      CPU Scheduling Simulator — Batch 2: FCFS Engine    \n";
-    std::cout << "=========================================================\n\n";
+void display_schedule_result(std::string_view algorithm_name,
+                             const cpu_scheduler::SchedulingResult& result) {
+    std::cout << "---------------------------------------------------------\n";
+    std::cout << " Algorithm: " << algorithm_name << "\n";
+    std::cout << "---------------------------------------------------------\n";
 
-    // 1. Define a workload with varied arrivals and an idle period
-    const std::vector<Process> workload = {
-        Process("P1", 0, 5, 2),
-        Process("P2", 2, 3, 1),
-        Process("P3", 4, 2, 3),
-        Process("P4", 12, 4, 1)  // Idle period occurs between 10 and 12
-    };
-
-    std::cout << "Input Workload:\n";
-    for (const auto& proc : workload) {
-        std::cout << "  " << proc << "\n";
+    // 1. Process Execution Order
+    std::cout << "Execution Order: ";
+    bool first = true;
+    for (const auto& seg : result.timeline()) {
+        if (seg.is_process()) {
+            if (!first) std::cout << " -> ";
+            std::cout << seg.process_id.value_or("?");
+            first = false;
+        }
     }
-    std::cout << "\nExecuting First Come, First Served (FCFS) Scheduling...\n\n";
+    std::cout << "\n\n";
 
-    const auto outcome = FcfsScheduler::run(workload);
+    // 2. Gantt Chart
+    std::cout << "Gantt Chart:\n";
+    std::cout << cpu_scheduler::GanttChart::render(result) << "\n";
 
-    if (!outcome.has_value()) {
-        std::cerr << "Scheduling failed: " << outcome.error_message() << "\n";
-        return 1;
-    }
-
-    const auto& result = outcome.value();
-
-    // 2. Display Gantt Chart
-    std::cout << "--- Gantt Chart Timeline ---\n\n";
-    std::cout << GanttChart::render(result) << "\n";
-
-    // 3. Display Detailed Process Metrics Table
-    std::cout << "--- Process Execution Details ---\n";
+    // 3. Process Metrics Table
     std::cout << std::left
               << std::setw(6)  << "PID"
               << std::setw(10) << "Arrival"
@@ -69,16 +58,51 @@ int main() {
     }
 
     // 4. Summary Metrics
-    std::cout << "\n--- Aggregate Performance Metrics ---\n";
     std::cout << std::fixed << std::setprecision(2);
-    std::cout << "Total Simulation Time: " << result.total_execution_time() << "\n";
-    std::cout << "CPU Busy Time:         " << result.cpu_busy_time() << "\n";
-    std::cout << "CPU Idle Time:         " << result.cpu_idle_time() << "\n";
-    std::cout << "CPU Utilization:       " << result.cpu_utilization() << "%\n";
+    std::cout << "\nAverage Waiting Time:  " << result.average_waiting_time() << "\n";
     std::cout << "Average Turnaround:    " << result.average_turnaround_time() << "\n";
-    std::cout << "Average Waiting Time:  " << result.average_waiting_time() << "\n";
-    std::cout << "Average Response Time: " << result.average_response_time() << "\n";
-    std::cout << "=========================================================\n";
+    std::cout << "CPU Utilization:       " << result.cpu_utilization() << "%\n\n";
+}
 
+} // namespace
+
+int main() {
+    using namespace cpu_scheduler;
+
+    std::cout << "=========================================================\n";
+    std::cout << "   CPU Scheduling Simulator — Batch 3: FCFS vs SJF       \n";
+    std::cout << "=========================================================\n\n";
+
+    // Standard comparison workload from Batch 3 specification
+    const std::vector<Process> workload = {
+        Process("P1", 0, 7),
+        Process("P2", 2, 4),
+        Process("P3", 4, 1),
+        Process("P4", 5, 4)
+    };
+
+    std::cout << "Input Workload:\n";
+    for (const auto& proc : workload) {
+        std::cout << "  " << proc << "\n";
+    }
+    std::cout << "\n";
+
+    // 1. Run FCFS
+    const auto fcfs_outcome = FcfsScheduler::run(workload);
+    if (fcfs_outcome.has_value()) {
+        display_schedule_result("First Come, First Served (FCFS)", fcfs_outcome.value());
+    } else {
+        std::cerr << "FCFS failed: " << fcfs_outcome.error_message() << "\n";
+    }
+
+    // 2. Run SJF
+    const auto sjf_outcome = SjfScheduler::run(workload);
+    if (sjf_outcome.has_value()) {
+        display_schedule_result("Shortest Job First (SJF, Non-Preemptive)", sjf_outcome.value());
+    } else {
+        std::cerr << "SJF failed: " << sjf_outcome.error_message() << "\n";
+    }
+
+    std::cout << "=========================================================\n";
     return 0;
 }

@@ -2,6 +2,7 @@ add_executable(cpu_scheduler_tests
     test_process.cpp
     test_process_validator.cpp
     test_fcfs_scheduler.cpp
+    test_sjf_scheduler.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests

@@ -1,6 +1,6 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS scheduling engine, and planned future algorithm extensions.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS and SJF scheduling engines, and planned future algorithm extensions.
 
 ---
 
@@ -15,24 +15,25 @@ The core architectural tenet of the simulator is the strict separation between:
 
 ```mermaid
 flowchart TD
-    subgraph InputLayer["1. Input & Validation Layer (Implemented)"]
+    subgraph InputLayer["1. Input & Validation Layer (Batch 1)"]
         RawWorkload["Process Workload\n(id, arrival_time, burst_time, priority)"] --> Validator["ProcessValidator"]
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2: FCFS Implemented)"]
-        ValidationResult -->|Valid| Fcfs["FcfsScheduler"]
-        Fcfs --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
-        Fcfs --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2 & 3 Implemented)"]
+        ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
+        ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
+        Fcfs & Sjf --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
+        Fcfs & Sjf --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
-    subgraph AnalyticsLayer["3. Results & Metrics Engine (Implemented)"]
+    subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
         Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Batch 2 Foundation Implemented)"]
+    subgraph PresentationLayer["4. Presentation Layer (Batch 2 & 3)"]
         SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
-        SchedulingResult --> CliMetrics["Metrics Display"]
+        SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
     end
 ```
 
@@ -40,7 +41,7 @@ flowchart TD
 
 ## 2. Component Boundaries & Responsibilities
 
-### 2.1 Process Input Model (`cpu_scheduler::Process`) — **Implemented**
+### 2.1 Process Input Model (`cpu_scheduler::Process`) — **Implemented (Batch 1)**
 - **Location**: `include/cpu_scheduler/process.hpp`
 - **Role**: Pure data model representing immutable workload input parameters:
   - `id`: Unique identifier (`std::string`).
@@ -51,7 +52,7 @@ flowchart TD
   - The model does not contain mutable simulation fields.
   - The original burst time is preserved and never modified during simulation.
 
-### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`) — **Implemented**
+### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`) — **Implemented (Batch 1)**
 - **Location**: `include/cpu_scheduler/process_validator.hpp`
 - **Role**: Validates input workloads against simulation integrity rules:
   1. **Non-Empty Workload**: At least one process must be supplied.
@@ -94,7 +95,7 @@ flowchart TD
 
 ### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/scheduling_result.hpp`
-- **Role**: Aggregates the execution timeline, per-process states, and summary metrics.
+- **Role**: Aggregates the execution timeline, per-process states, and summary metrics. Shared across all scheduling algorithms.
 - **Metrics Computed**:
   - `total_execution_time`: Total duration of the simulation ($Busy Time + Idle Time$).
   - `cpu_busy_time`: Sum of burst times across all scheduled processes.
@@ -119,17 +120,28 @@ flowchart TD
   6. Detects and prevents signed 64-bit integer overflow during time accumulation.
   7. Returns a structured `ScheduleOutcome`.
 
-### 2.7 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.7 SJF Scheduler (`cpu_scheduler::SjfScheduler`) — **Implemented (Batch 3)**
+- **Location**: `include/cpu_scheduler/sjf_scheduler.hpp`
+- **Role**: Implements non-preemptive Shortest Job First scheduling.
+- **Dynamic Ready-Queue Selection**:
+  - Only processes with $arrival\_time \le current\_time$ are admitted into the ready queue.
+  - Selection priority:
+    1. Shortest `burst_time`.
+    2. Earlier `arrival_time` (tie-breaker).
+    3. Original input index (stable tie-breaker).
+  - Unarrived processes cannot be selected regardless of burst time.
+  - Implemented using an initial $O(n \log n)$ sort by arrival time and a min-priority queue for ready processes. Overall complexity is $O(n \log n)$ time and $O(n)$ space.
+
+### 2.8 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
-- **Decoupling**: Contains zero scheduling or simulation logic. Purely transforms execution intervals into aligned text diagrams.
+- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically by both FCFS and SJF.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 3+)
+## 3. Future Scheduling Algorithms (Planned for Batches 4+)
 
 The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
-- **Shortest Job First (SJF)**: Non-preemptive priority based on shortest burst time.
 - **Shortest Remaining Time First (SRTF)**: Preemptive SJF with preemption points at new arrivals.
 - **Priority Scheduling**: Preemptive and non-preemptive selection using process priority integers.
 - **Round Robin (RR)**: Preemptive time-slicing using a configurable quantum.

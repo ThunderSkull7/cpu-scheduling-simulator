@@ -4,35 +4,82 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 2 — FCFS Scheduling Implementation
+## Current Status: Batch 3 — Non-Preemptive SJF Implementation
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
 - [x] **Process Execution State**: Decoupled dynamic tracking (`ProcessState`) preserving original workload parameters.
 - [x] **Execution Timeline**: Complete execution history (`ExecutionSegment`) with explicit CPU idle tracking.
 - [x] **FCFS Scheduling Engine**: Non-preemptive First Come, First Served scheduler (`FcfsScheduler`) with stable tie-breaking and arithmetic overflow protection.
+- [x] **Non-Preemptive SJF Scheduling Engine**: Shortest Job First scheduler (`SjfScheduler`) with dynamic ready queue selection and three-tier deterministic tie-breaking.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`).
-- [x] **Unit Testing Suite**: 57 GoogleTest unit tests covering model invariants, validation rules, FCFS edge cases, and metrics.
-- [ ] **Shortest Job First (SJF) & SRTF** *(Planned - Batch 3)*
-- [ ] **Round Robin & Priority Scheduling** *(Planned - Batch 4)*
-- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 5)*
+- [x] **Unit Testing Suite**: **109 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, and metrics.
+- [ ] **Shortest Remaining Time First (SRTF)** *(Planned - Batch 4)*
+- [ ] **Round Robin & Priority Scheduling** *(Planned - Batch 5)*
+- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 6)*
 
 ---
 
-## First Come, First Served (FCFS) Scheduling
+## Scheduling Algorithms
 
-### Algorithm Overview
+### 1. First Come, First Served (FCFS)
 
-**First Come, First Served (FCFS)** is a fundamental non-preemptive scheduling algorithm. Processes are dispatched strictly in the order they arrive in the ready queue. Once a process is allocated the CPU, it runs uninterrupted until its entire burst time is consumed.
+- **Philosophy**: Non-preemptive, FIFO arrival-based dispatching.
+- **Selection**: The process that arrived earliest in the system executes first.
+- **Tie-Breaking**: Relative input order is preserved for simultaneous arrivals.
 
-### Scheduling Rules
+---
 
-1. **Arrival-Order Selection**: Processes are executed in ascending order of their arrival time.
-2. **Stable Tie-Breaking**: When multiple processes arrive simultaneously, their relative input order is strictly preserved.
-3. **Non-Preemptive Execution**: A running process retains the CPU until completion.
-4. **Explicit CPU Idle Periods**: If no process is ready at the current simulation timestamp, the CPU remains idle until the next arrival. Explicit idle segments are inserted into the execution timeline. Zero-length idle intervals are prohibited.
-5. **Overflow Protection**: All time calculations and metric accumulations use overflow-checked 64-bit arithmetic (`safe_add`).
+### 2. Shortest Job First (SJF, Non-Preemptive)
+
+- **Philosophy**: Selects the process with the shortest CPU burst time among all processes that have already arrived and are waiting in the ready queue.
+- **Non-Preemptive**: Once dispatched, a process runs continuously to completion. A shorter process arriving in the future cannot preempt the currently executing process.
+- **Dynamic Ready-Queue Selection**:
+  The scheduler dynamically filters candidates such that only processes with $\text{Arrival Time} \le \text{Current Time}$ are eligible for selection. It does **not** sort the global workload purely by burst time.
+- **Deterministic Tie-Breaking Rules**:
+  1. **Primary**: Shorter burst time has priority.
+  2. **Secondary**: Earlier arrival time breaks burst-time ties.
+  3. **Tertiary**: Original input sequence order breaks simultaneous arrival ties.
+- **Complexity**: $O(n \log n)$ time and $O(n)$ space utilizing a min-priority queue.
+
+---
+
+## Comparison: FCFS vs. SJF
+
+Consider the following benchmark workload:
+
+| Process | Arrival Time | Burst Time | Priority |
+| :--- | :---: | :---: | :---: |
+| **P1** | 0 | 7 | 0 |
+| **P2** | 2 | 4 | 0 |
+| **P3** | 4 | 1 | 0 |
+| **P4** | 5 | 4 | 0 |
+
+### FCFS Execution
+- **Order**: P1 (0–7) $\rightarrow$ P2 (7–11) $\rightarrow$ P3 (11–12) $\rightarrow$ P4 (12–16)
+- **Gantt Chart**:
+  ```text
+  | P1 | P2 | P3 | P4 |
+  0    7    11   12   16
+  ```
+- **Average Waiting Time**: **4.75**
+- **Average Turnaround Time**: **8.75**
+
+### SJF Execution
+- At $t=0$, only P1 is available $\rightarrow$ P1 executes [0, 7].
+- At $t=7$, P2 (burst 4), P3 (burst 1), and P4 (burst 4) have all arrived.
+  - P3 has the shortest burst (1) $\rightarrow$ P3 executes [7, 8].
+  - P2 and P4 both have burst 4; P2 arrived earlier ($t=2$ vs $t=5$) $\rightarrow$ P2 executes [8, 12].
+  - P4 executes [12, 16].
+- **Order**: P1 (0–7) $\rightarrow$ P3 (7–8) $\rightarrow$ P2 (8–12) $\rightarrow$ P4 (12–16)
+- **Gantt Chart**:
+  ```text
+  | P1 | P3 | P2 | P4 |
+  0    7    8    12   16
+  ```
+- **Average Waiting Time**: **4.00** *(15.8% reduction in waiting time!)*
+- **Average Turnaround Time**: **8.00** *(8.6% reduction in turnaround time!)*
 
 ---
 
@@ -45,59 +92,14 @@ For each process $i$:
 | **Completion Time ($CT$)** | $Start\ Time + Burst\ Time$ | Timestamp at which the process finishes execution. |
 | **Turnaround Time ($TAT$)** | $Completion\ Time - Arrival\ Time$ | Total elapsed time from arrival to termination. |
 | **Waiting Time ($WT$)** | $Turnaround\ Time - Burst\ Time$ | Total time the process spent waiting in the ready queue. |
-| **Response Time ($RT$)** | $First\ Start\ Time - Arrival\ Time$ | Time elapsed from arrival until the process first executes. *(Note: For non-preemptive FCFS, $RT = WT$)* |
+| **Response Time ($RT$)** | $First\ Start\ Time - Arrival\ Time$ | Time from arrival until first execution ($RT = WT$ for non-preemptive algorithms). |
 
-### System-Wide Performance Metrics
+### Aggregate Performance Metrics
 
-- **Average Turnaround Time**:
-  $$\text{Avg TAT} = \frac{1}{N} \sum_{i=1}^N TAT_i$$
-- **Average Waiting Time**:
-  $$\text{Avg WT} = \frac{1}{N} \sum_{i=1}^N WT_i$$
-- **Average Response Time**:
-  $$\text{Avg RT} = \frac{1}{N} \sum_{i=1}^N RT_i$$
-- **CPU Utilization**:
-  $$\text{CPU Utilization} = \left(\frac{\text{CPU Busy Time}}{\text{Total Simulation Time}}\right) \times 100\%$$
-
----
-
-## Execution Example
-
-### Input Workload
-
-| Process | Arrival Time | Burst Time | Priority |
-| :--- | :---: | :---: | :---: |
-| **P1** | 0 | 5 | 2 |
-| **P2** | 2 | 3 | 1 |
-| **P3** | 4 | 2 | 3 |
-| **P4** | 12 | 4 | 1 |
-
-### Execution Trace & Timeline
-
-1. At time `t = 0`, **P1** arrives and executes until `t = 5`.
-2. At `t = 5`, **P2** (arrived at `t = 2`) starts and executes until `t = 8`.
-3. At `t = 8`, **P3** (arrived at `t = 4`) starts and executes until `t = 10`.
-4. At `t = 10`, no process is ready. CPU remains **Idle** from `t = 10` to `t = 12`.
-5. At `t = 12`, **P4** arrives and executes until `t = 16`.
-
-### ASCII Gantt Chart
-
-```text
-| P1 | P2 | P3 | Idle | P4 |
-0    5    8    10     12   16
-```
-
-### Metrics Summary
-
-- **P1**: CT = 5, TAT = 5, WT = 0, RT = 0
-- **P2**: CT = 8, TAT = 6, WT = 3, RT = 3
-- **P3**: CT = 10, TAT = 6, WT = 4, RT = 4
-- **P4**: CT = 16, TAT = 4, WT = 0, RT = 0
-- **Total Simulation Time**: 16
-- **CPU Busy Time**: 14 | **CPU Idle Time**: 2
-- **CPU Utilization**: 87.50%
-- **Average Turnaround Time**: 5.25
-- **Average Waiting Time**: 1.75
-- **Average Response Time**: 1.75
+- **Average Turnaround Time**: $\text{Avg TAT} = \frac{1}{N} \sum_{i=1}^N TAT_i$
+- **Average Waiting Time**: $\text{Avg WT} = \frac{1}{N} \sum_{i=1}^N WT_i$
+- **Average Response Time**: $\text{Avg RT} = \frac{1}{N} \sum_{i=1}^N RT_i$
+- **CPU Utilization**: $\left(\frac{\text{CPU Busy Time}}{\text{Total Simulation Time}}\right) \times 100\%$
 
 ---
 
@@ -123,8 +125,6 @@ For each process $i$:
 ## Build and Test Instructions
 
 ### 1. Environment Setup
-
-Ensure `VCPKG_ROOT` points to your vcpkg installation:
 
 ```powershell
 $env:VCPKG_ROOT = "C:\vcpkg"
@@ -153,10 +153,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (57 tests)
+# Debug test suite (109 tests)
 ctest --preset debug-test
 
-# Release test suite (57 tests)
+# Release test suite (109 tests)
 ctest --preset release-test
 ```
 
@@ -191,6 +191,7 @@ CPU Scheduling Simulator/
 │       ├── execution_segment.hpp# Timeline segment (Process / Idle)
 │       ├── scheduling_result.hpp# Results container & error handling
 │       ├── fcfs_scheduler.hpp   # FCFS scheduling engine
+│       ├── sjf_scheduler.hpp    # Non-preemptive SJF scheduling engine
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -200,18 +201,20 @@ CPU Scheduling Simulator/
 │   ├── execution_segment.cpp
 │   ├── scheduling_result.cpp
 │   ├── fcfs_scheduler.cpp
+│   ├── sjf_scheduler.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
 │   ├── CMakeLists.txt          # GoogleTest suite target
-│   ├── test_process.cpp        # Tests for process data model
-│   ├── test_process_validator.cpp # Tests for validation logic
-│   └── test_fcfs_scheduler.cpp # Comprehensive FCFS and metric tests (34 tests)
+│   ├── test_process.cpp        # Tests for process data model (7 tests)
+│   ├── test_process_validator.cpp # Tests for validation logic (16 tests)
+│   ├── test_fcfs_scheduler.cpp # Tests for FCFS scheduling engine (34 tests)
+│   └── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation
 │
 └── examples/
     ├── CMakeLists.txt          # Example runner target
-    └── basic_usage.cpp         # Demonstrates FCFS execution and Gantt chart output
+    └── basic_usage.cpp         # Demonstrates FCFS vs SJF comparison and Gantt charts
 ```
