@@ -1,0 +1,26 @@
+# Build directories
+build/
+out/
+bin/
+lib/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# CMake files
+CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+
+# vcpkg
+vcpkg_installed/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

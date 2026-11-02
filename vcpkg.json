@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "cpu-scheduling-simulator",
+  "version-string": "0.1.0",
+  "description": "C++20 CPU Scheduling Simulator - Batch 1: Project Foundation",
+  "dependencies": [],
+  "features": {
+    "tests": {
+      "description": "Dependencies required for building unit tests",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}
