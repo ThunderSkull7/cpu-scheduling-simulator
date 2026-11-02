@@ -1,16 +1,17 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models and planned simulation stages.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS scheduling engine, and planned future algorithm extensions.
 
 ---
 
 ## 1. Architectural Philosophy
 
 The core architectural tenet of the simulator is the strict separation between:
-1. **Immutable Workload Inputs**: The specification of what arrives and its declared requirements.
-2. **Mutable Simulation State**: The dynamic execution state tracking a process inside an algorithm's scheduling loop.
-3. **Execution History & Metrics**: The deterministic trace of scheduling decisions and subsequent statistical analysis.
-4. **Presentation & CLI**: Visualization (Gantt charts, tables) and user interaction.
+1. **Immutable Workload Inputs**: The specification of what arrives and its declared requirements (`Process`).
+2. **Mutable Simulation State**: Dynamic execution tracking for individual processes (`ProcessState`).
+3. **Execution Timeline & Segments**: The complete chronological trace of CPU activity, including explicit idle intervals (`ExecutionSegment`).
+4. **Simulation Results & Analytics**: Deterministic post-execution metrics and aggregate statistics (`SchedulingResult`).
+5. **Presentation**: Decoupled visualization renderers (e.g. `GanttChart`).
 
 ```mermaid
 flowchart TD
@@ -19,20 +20,19 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Planned)"]
-        ValidationResult -->|Valid| Engine["Scheduler / Algorithm Engine"]
-        Engine --> State["Scheduling State / Ready Queue\n(remaining_time, start_time, completion_time)"]
-        AlgorithmStrategy["Algorithm Strategy\n(FCFS, SJF, SRTF, Priority, RR)"] -.-> Engine
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2: FCFS Implemented)"]
+        ValidationResult -->|Valid| Fcfs["FcfsScheduler"]
+        Fcfs --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
+        Fcfs --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
-    subgraph AnalyticsLayer["3. Results & Metrics Engine (Planned)"]
-        Engine --> ScheduleTimeline["Execution Timeline / Gantt Segments"]
-        ScheduleTimeline --> MetricsCalc["Metrics Calculator\n(TAT, WT, RT, CPU Utilization, Throughput)"]
+    subgraph AnalyticsLayer["3. Results & Metrics Engine (Implemented)"]
+        Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Planned)"]
-        ScheduleTimeline --> GanttRenderer["Gantt Chart Renderer"]
-        MetricsCalc --> MetricsReport["Tabular Metrics & Comparison View"]
+    subgraph PresentationLayer["4. Presentation Layer (Batch 2 Foundation Implemented)"]
+        SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
+        SchedulingResult --> CliMetrics["Metrics Display"]
     end
 ```
 
@@ -43,14 +43,13 @@ flowchart TD
 ### 2.1 Process Input Model (`cpu_scheduler::Process`) — **Implemented**
 - **Location**: `include/cpu_scheduler/process.hpp`
 - **Role**: Pure data model representing immutable workload input parameters:
-  - `id`: Unique identifier (string).
+  - `id`: Unique identifier (`std::string`).
   - `arrival_time`: Point in simulation time when the process enters the system (`Time = std::int64_t`).
   - `burst_time`: Total CPU execution time required (`Time = std::int64_t`).
   - `priority`: Static scheduling priority (`int`).
 - **Invariants & Design Constraints**:
-  - The model does not contain mutable simulation fields (e.g., remaining execution time or state flags).
-  - The model never stores calculated metrics (e.g., turnaround time, waiting time, completion time).
-  - The original burst time is preserved and never modified.
+  - The model does not contain mutable simulation fields.
+  - The original burst time is preserved and never modified during simulation.
 
 ### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`) — **Implemented**
 - **Location**: `include/cpu_scheduler/process_validator.hpp`
@@ -63,56 +62,74 @@ flowchart TD
 - **Invariants & Design Constraints**:
   - Validations do not modify the input process vector.
   - Returns `ValidationResult` containing all detected errors rather than aborting at the first failure.
-  - Does not use C++ exceptions for standard validation failures.
+  - Zero exceptions for standard input validation.
+
+### 2.3 Process Execution State (`cpu_scheduler::ProcessState`) — **Implemented (Batch 2)**
+- **Location**: `include/cpu_scheduler/process_state.hpp`
+- **Role**: Dynamic execution and performance metrics state for an individual process.
+- **Fields**:
+  - `process_id`: Identifier corresponding to the input process.
+  - `arrival_time`, `burst_time`, `priority`: Copied input parameters.
+  - `remaining_time`: Remaining CPU time to execute.
+  - `start_time`: Timestamp when the process first received CPU execution.
+  - `completion_time`: Timestamp when the process terminated execution.
+  - `turnaround_time`: Total time spent in the system ($CT - Arrival Time$).
+  - `waiting_time`: Total time spent waiting in the ready queue ($TAT - Burst Time$).
+  - `response_time`: Duration from arrival until initial execution ($Start Time - Arrival Time$).
+  - `status`: Lifecycle enumeration (`NotStarted`, `Running`, `Completed`).
+- **Isolation**: Keeps execution variables completely separate from the original input `Process`.
+
+### 2.4 Execution Timeline (`cpu_scheduler::ExecutionSegment`) — **Implemented (Batch 2)**
+- **Location**: `include/cpu_scheduler/execution_segment.hpp`
+- **Role**: Represents an atomic contiguous block of CPU time.
+- **Fields**:
+  - `type`: `SegmentType::Process` or `SegmentType::Idle`.
+  - `process_id`: ID of the running process, or `std::nullopt` during CPU idle.
+  - `start_time`: Simulation start timestamp.
+  - `end_time`: Simulation completion timestamp.
+  - `duration()`: Convenience helper ($end\_time - start\_time$).
+- **Rules**:
+  - CPU idle intervals are recorded explicitly (`SegmentType::Idle`).
+  - Zero-length idle intervals are prohibited (e.g., when a process arrives at the exact time the previous finishes).
+
+### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`) — **Implemented (Batch 2)**
+- **Location**: `include/cpu_scheduler/scheduling_result.hpp`
+- **Role**: Aggregates the execution timeline, per-process states, and summary metrics.
+- **Metrics Computed**:
+  - `total_execution_time`: Total duration of the simulation ($Busy Time + Idle Time$).
+  - `cpu_busy_time`: Sum of burst times across all scheduled processes.
+  - `cpu_idle_time`: Sum of all idle interval durations.
+  - `cpu_utilization`: $(cpu\_busy\_time / total\_execution\_time) \times 100\%$.
+  - `average_waiting_time`: $\sum WT / N$.
+  - `average_turnaround_time`: $\sum TAT / N$.
+  - `average_response_time`: $\sum RT / N$.
+- **Error Distinction**:
+  - `ScheduleOutcome` holds either a successful `SchedulingResult` or a `ScheduleError`.
+  - Differentiates between input validation failures (`ScheduleErrorKind::ValidationError`) and arithmetic overflows (`ScheduleErrorKind::ArithmeticOverflow`).
+
+### 2.6 FCFS Scheduler (`cpu_scheduler::FcfsScheduler`) — **Implemented (Batch 2)**
+- **Location**: `include/cpu_scheduler/fcfs_scheduler.hpp`
+- **Role**: Implements non-preemptive First Come, First Served scheduling.
+- **Responsibilities**:
+  1. Validates the workload using `ProcessValidator`.
+  2. Arranges processes by ascending `arrival_time` using stable sort (preserving input order for simultaneous arrivals).
+  3. Dispatches processes sequentially to completion.
+  4. Inserts explicit CPU idle segments when no process is ready.
+  5. Computes per-process metrics and system-wide statistics.
+  6. Detects and prevents signed 64-bit integer overflow during time accumulation.
+  7. Returns a structured `ScheduleOutcome`.
+
+### 2.7 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+- **Location**: `include/cpu_scheduler/gantt_chart.hpp`
+- **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
+- **Decoupling**: Contains zero scheduling or simulation logic. Purely transforms execution intervals into aligned text diagrams.
 
 ---
 
-### 2.3 Process Scheduling State (`ProcessState`) — **Planned (Batch 2)**
-- **Role**: Runtime representation of a process actively being scheduled.
-- **Planned Fields**:
-  - Reference or pointer to the original immutable `Process`.
-  - `remaining_time`: Decremented as the process is allocated CPU cycles.
-  - `first_execution_time`: Simulation timestamp when the process first ran (for Response Time).
-  - `completion_time`: Simulation timestamp when the process finished its execution.
-  - `state`: Current lifecycle state (`READY`, `RUNNING`, `WAITING`, `TERMINATED`).
-- **Isolation**: Prevents mutating the original workload, allowing repeated or comparative simulations across multiple algorithms with identical inputs.
+## 3. Future Scheduling Algorithms (Planned for Batches 3+)
 
-### 2.4 Scheduling Algorithms (`SchedulerStrategy`) — **Planned (Batch 2 / 3)**
-- **Algorithms**:
-  - **FCFS** (First Come First Served): Non-preemptive, FIFO order based on arrival time.
-  - **SJF** (Shortest Job First): Non-preemptive, selects available process with smallest burst time.
-  - **SRTF** (Shortest Remaining Time First): Preemptive, selects process with shortest remaining burst time.
-  - **Priority Scheduling**: Preemptive and non-preemptive variants based on process priority integer.
-  - **Round Robin (RR)**: Preemptive, time-sliced execution with configurable quantum.
-- **Interface Contract**: Takes `std::span<const Process>` and parameters (e.g., time quantum), and yields a deterministic execution timeline.
-
-### 2.5 Execution History & Gantt Chart Rendering — **Planned**
-- **Schedule Timeline**: An ordered sequence of execution intervals `[start_time, end_time, process_id]`, including CPU idle intervals.
-- **Gantt Chart Renderer**: Transforms execution intervals into visual ASCII/ANSI timeline representations.
-
-### 2.6 Metrics Calculation — **Planned**
-- **Per-Process Metrics**:
-  - **Completion Time ($CT$)**: Simulation time at which execution terminates.
-  - **Turnaround Time ($TAT$)**: $TAT = CT - Arrival Time$.
-  - **Waiting Time ($WT$)**: $WT = TAT - Burst Time$.
-  - **Response Time ($RT$)**: $RT = First Execution Time - Arrival Time$.
-- **System Metrics**:
-  - Average Turnaround Time, Average Waiting Time, Average Response Time.
-  - CPU Utilization percentage.
-  - Throughput (processes completed per unit time).
-
-### 2.7 CLI Interface — **Planned**
-- Interactive command-line and batch runner allowing users to specify workloads (via manual entry or file inputs), select scheduling algorithms, view step-by-step Gantt charts, and compare algorithm performance metrics side by side.
-
----
-
-## 3. Technology Stack & Design Decisions
-
-| Aspect | Choice | Justification |
-| :--- | :--- | :--- |
-| **Language** | C++20 | Modern type safety, `<span>`, designated initializers, spaceship comparison, concepts. |
-| **Integer Width** | `std::int64_t` (`Time`) | Eliminates 32-bit overflow concerns during extensive simulation runs. |
-| **Error Handling** | Value-based `ValidationResult` | Predictable, composable, zero-cost error collection without control-flow exceptions. |
-| **Build System** | CMake 3.20+ with Presets | Standardized, cross-platform build orchestration with out-of-source builds. |
-| **Package Manager** | vcpkg (Manifest Mode) | Reproducible, version-locked dependencies (`gtest`). |
-| **Testing** | GoogleTest (gtest) | Industry-standard C++ testing framework with granular test discovery. |
+The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
+- **Shortest Job First (SJF)**: Non-preemptive priority based on shortest burst time.
+- **Shortest Remaining Time First (SRTF)**: Preemptive SJF with preemption points at new arrivals.
+- **Priority Scheduling**: Preemptive and non-preemptive selection using process priority integers.
+- **Round Robin (RR)**: Preemptive time-slicing using a configurable quantum.

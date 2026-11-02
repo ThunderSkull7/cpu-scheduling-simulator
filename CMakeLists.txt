@@ -20,6 +20,11 @@ option(BUILD_EXAMPLES "Build example programs" ON)
 add_library(cpu_scheduler_lib
     src/process.cpp
     src/process_validator.cpp
+    src/process_state.cpp
+    src/execution_segment.cpp
+    src/scheduling_result.cpp
+    src/fcfs_scheduler.cpp
+    src/gantt_chart.cpp
 )
 
 target_include_directories(cpu_scheduler_lib
