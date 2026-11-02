@@ -28,6 +28,7 @@ add_library(cpu_scheduler_lib
     src/srtf_scheduler.cpp
     src/rr_scheduler.cpp
     src/priority_scheduler.cpp
+    src/mlq_scheduler.cpp
     src/gantt_chart.cpp
 )
 

@@ -4,11 +4,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 6 — Priority Scheduling Implementation
+## Current Status: Batch 7 — Multilevel Queue (MLQ) Scheduling Implementation
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
-- [x] **Process Execution State**: Decoupled dynamic tracking (`ProcessState`) preserving original workload parameters.
+- [x] **Process Execution State**: Decoupled dynamic tracking (`ProcessState`) preserving original workload parameters and assigned `queue_id`.
 - [x] **Execution Timeline**: Complete execution history (`ExecutionSegment`) with explicit CPU idle tracking.
 - [x] **FCFS Scheduling Engine**: Non-preemptive First Come, First Served scheduler (`FcfsScheduler`) with stable tie-breaking and arithmetic overflow protection.
 - [x] **Non-Preemptive SJF Scheduling Engine**: Shortest Job First scheduler (`SjfScheduler`) with dynamic ready queue selection and three-tier deterministic tie-breaking.
@@ -16,10 +16,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Preemptive Round Robin (RR) Scheduling Engine**: Round Robin scheduler (`RrScheduler`) with configurable time quantum, strict FIFO queue rotation, simultaneous arrival handling, timeline normalization, and overflow protection.
 - [x] **Non-Preemptive Priority Scheduling Engine**: Priority scheduler (`NonPreemptivePriorityScheduler`) selecting highest-priority ready processes (smaller numerical value = higher priority) with stable tie-breaking.
 - [x] **Preemptive Priority Scheduling Engine**: Priority scheduler (`PreemptivePriorityScheduler`) featuring event-driven simulation, preemption on strictly higher priority (`new_proc.priority < running_proc.priority`), equal-priority non-preemption, and preserved remaining burst times.
+- [x] **Multilevel Queue (MLQ) Scheduling Engine**: Comprehensive multilevel queue scheduler (`MlqScheduler`) featuring multiple independent ready queues, permanent process-to-queue binding, configurable queue algorithms (FCFS, SJF, SRTF, RR, Non-Preemptive Priority, Preemptive Priority), and configurable inter-queue policies (Fixed-Priority Preemptive and Round Robin between queues).
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **294 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, and Priority scheduling variants.
-- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 7)*
+- [x] **Unit Testing Suite**: **371 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, Priority scheduling variants, and 77 new MLQ tests.
+- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 8)*
 
 ---
 
@@ -118,6 +119,39 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - **Starvation Limitation & Aging**:
   - Fixed-priority scheduling can lead to indefinite starvation of lower-priority processes if higher-priority work continuously arrives.
   - Priority aging (gradually elevating the priority of long-waiting processes) will be implemented in a subsequent batch.
+
+---
+
+### 7. Multilevel Queue (MLQ) Scheduling
+
+- **Philosophy**: Partitions processes permanently into distinct, independent ready queues based on process category (e.g., system services, interactive tasks, batch jobs).
+- **MLQ vs. MLFQ Distinction**:
+  - In **MLQ**, a process is permanently assigned to exactly one queue for the entire simulation. Processes do **not** move between queues, and feedback-based queue reassignment or priority aging is excluded.
+- **Queue Priority vs. Process Priority**:
+  - **Queue Priority**: Determines which ready queue is selected to execute by the inter-queue scheduler. Smaller numerical queue priority indicates higher scheduling preference ($0 < 1 < 2$).
+  - **Process Priority**: Governs intra-queue candidate ordering when a queue uses a priority-based internal algorithm (`NonPreemptivePriority` or `PreemptivePriority`).
+- **Configurable Inter-Queue Scheduling Policies**:
+  1. `InterQueuePolicy::FixedPriorityPreemptive`:
+     - The highest-priority non-empty queue always executes.
+     - An arriving process in a strictly higher-priority queue preempts any currently executing process in a lower-priority queue immediately.
+     - Deterministic tie-breaking for equal queue priorities favors the queue declared earlier in configuration order.
+  2. `InterQueuePolicy::RoundRobin`:
+     - CPU time is distributed cyclically across all non-empty ready queues using an inter-queue time quantum ($Q_{\text{inter}}$).
+     - Empty queues are skipped instantaneously without CPU time consumption.
+     - An interrupted queue resumes execution in its next cycle, retaining process progress and state.
+- **Supported Intra-Queue Algorithms**:
+  - `QueueAlgorithm::Fcfs` (First-Come, First-Served)
+  - `QueueAlgorithm::Sjf` (Non-Preemptive Shortest Job First)
+  - `QueueAlgorithm::Srtf` (Preemptive Shortest Remaining Time First)
+  - `QueueAlgorithm::RoundRobin` (Intra-queue Round Robin with quantum $q_{\text{internal}}$)
+  - `QueueAlgorithm::NonPreemptivePriority` (Non-preemptive priority within queue)
+  - `QueueAlgorithm::PreemptivePriority` (Preemptive priority within queue)
+- **Two-Level Quantum Interaction**:
+  - When a queue uses internal Round Robin ($q$) and the inter-queue policy is Round Robin ($Q$), both quanta decrease concurrently by the elapsed slice duration $\Delta t$. If the internal quantum expires, the process is rotated within the queue; if the inter-queue quantum expires, the CPU switches to the next non-empty queue while preserving the active process's remaining internal slice.
+- **Complexity**:
+  - Let $K$ be the number of queues, $N$ be total processes, and $B$ be total burst time.
+  - Fixed-Priority Inter-Queue: $O(N \log N + K \cdot E)$ where $E$ is the number of scheduling events ($\le 2N$).
+  - Round Robin Inter-Queue: $O(N \log N + \frac{B}{Q_{\text{inter}}} \cdot K)$ time and $O(N + \frac{B}{Q_{\text{inter}}})$ space.
 
 ---
 

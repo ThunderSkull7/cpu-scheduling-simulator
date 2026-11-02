@@ -1,5 +1,6 @@
 #include "cpu_scheduler/fcfs_scheduler.hpp"
 #include "cpu_scheduler/gantt_chart.hpp"
+#include "cpu_scheduler/mlq_scheduler.hpp"
 #include "cpu_scheduler/priority_scheduler.hpp"
 #include "cpu_scheduler/process.hpp"
 #include "cpu_scheduler/rr_scheduler.hpp"
@@ -139,6 +140,41 @@ int main() {
         display_schedule_result("Preemptive Priority Scheduling", p_prio_outcome.value());
     } else {
         std::cerr << "Preemptive Priority failed: " << p_prio_outcome.error_message() << "\n";
+    }
+
+    // 7. Run Multilevel Queue (MLQ) - Fixed-Priority Preemptive Inter-Queue Policy
+    using namespace cpu_scheduler;
+    MlqWorkload mlq_fp_workload;
+    mlq_fp_workload.set_inter_queue_policy(InterQueuePolicy::FixedPriorityPreemptive)
+                   .add_queue(MlqQueueConfig("System_Q0", 0, QueueAlgorithm::RoundRobin, 2))
+                   .add_queue(MlqQueueConfig("Interactive_Q1", 1, QueueAlgorithm::Fcfs))
+                   .add_queue(MlqQueueConfig("Batch_Q2", 2, QueueAlgorithm::Fcfs))
+                   .add_process(Process("Sys1", 0, 4), "System_Q0")
+                   .add_process(Process("Sys2", 1, 2), "System_Q0")
+                   .add_process(Process("Int1", 0, 3), "Interactive_Q1")
+                   .add_process(Process("Bat1", 0, 5), "Batch_Q2");
+
+    const auto mlq_fp_outcome = MlqScheduler::run(mlq_fp_workload);
+    if (mlq_fp_outcome.has_value()) {
+        display_schedule_result("Multilevel Queue (MLQ: Fixed-Priority Preemptive Inter-Queue)", mlq_fp_outcome.value());
+    } else {
+        std::cerr << "MLQ Fixed-Priority failed: " << mlq_fp_outcome.error_message() << "\n";
+    }
+
+    // 8. Run Multilevel Queue (MLQ) - Round Robin Inter-Queue Policy
+    MlqWorkload mlq_rr_workload;
+    mlq_rr_workload.set_inter_queue_policy(InterQueuePolicy::RoundRobin)
+                   .set_default_inter_queue_quantum(2)
+                   .add_queue(MlqQueueConfig("Interactive_Q0", 0, QueueAlgorithm::RoundRobin, 2))
+                   .add_queue(MlqQueueConfig("Batch_Q1", 1, QueueAlgorithm::Fcfs))
+                   .add_process(Process("Interactive1", 0, 5), "Interactive_Q0")
+                   .add_process(Process("Batch1", 0, 4), "Batch_Q1");
+
+    const auto mlq_rr_outcome = MlqScheduler::run(mlq_rr_workload);
+    if (mlq_rr_outcome.has_value()) {
+        display_schedule_result("Multilevel Queue (MLQ: Round Robin Inter-Queue, Quantum = 2)", mlq_rr_outcome.value());
+    } else {
+        std::cerr << "MLQ Round Robin failed: " << mlq_rr_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";

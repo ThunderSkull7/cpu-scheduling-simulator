@@ -33,6 +33,7 @@ struct ProcessState {
     Time waiting_time{0};
     Time response_time{0};
     ProcessExecutionStatus status{ProcessExecutionStatus::NotStarted};
+    std::string queue_id{};
 
     constexpr ProcessState() = default;
 

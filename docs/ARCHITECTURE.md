@@ -20,15 +20,16 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-6 Implemented)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-7 Implemented)"]
         ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
         ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
         ValidationResult -->|Valid| Rr["RrScheduler\n(Preemptive Round Robin)"]
         ValidationResult -->|Valid| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
         ValidationResult -->|Valid| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
-        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
-        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+        ValidationResult -->|Valid| Mlq["MlqScheduler\n(Multilevel Queue Scheduling)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, queue_id, status)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
     subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
@@ -192,14 +193,29 @@ flowchart TD
   - Fixed-priority scheduling inherently suffers from starvation of lower-priority processes when higher-priority processes arrive continuously.
   - Priority aging (gradually incrementing priority of waiting processes) is intentionally out of scope for Batch 6 and will be implemented in future batches.
 
-### 2.11 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.11 Multilevel Queue Scheduler (`cpu_scheduler::MlqScheduler`) — **Implemented (Batch 7)**
+- **Location**: `include/cpu_scheduler/mlq_scheduler.hpp`, `src/mlq_scheduler.cpp`
+- **Role**: Implements Multilevel Queue (MLQ) scheduling with multiple distinct ready queues.
+- **Architectural Tenets**:
+  1. **Permanent Process-to-Queue Assignment**: Each process is bound to exactly one queue (`MlqProcessBinding`) throughout the simulation. No inter-queue migration or aging occurs (strictly separated from MLFQ).
+  2. **Decoupled Queue vs. Process Priority**: Queue priority governs inter-queue CPU allocation (smaller numerical value = higher queue priority). Process priority governs intra-queue selection for priority-based queue algorithms.
+  3. **Configurable Inter-Queue Policies**:
+     - `InterQueuePolicy::FixedPriorityPreemptive`: The ready queue with the highest priority executes; arrivals in higher-priority queues trigger immediate preemption.
+     - `InterQueuePolicy::RoundRobin`: Cycles through non-empty queues with an inter-queue time quantum ($Q_{\text{inter}}$).
+  4. **Supported Intra-Queue Algorithms**: FCFS, Non-preemptive SJF, Preemptive SRTF, Round Robin (with internal quantum $q_{\text{internal}}$), Non-preemptive Priority, Preemptive Priority.
+  5. **Two-Level Quantum Interaction**: In nested Round Robin configurations, the internal slice and inter-queue slice decrease concurrently. State preservation allows an interrupted process to resume its remaining internal slice upon queue re-entry.
+  6. **Timeline Normalization**: Merges consecutive slices of the same process into unbroken execution segments.
+- **Complexity**: $O(N \log N + K \cdot E)$ for Fixed Priority; $O(N \log N + \frac{B}{Q} \cdot K)$ for Round Robin between queues.
+
+### 2.12 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
 - **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 7+)
+## 3. Future Scheduling Algorithms (Planned for Batches 8+)
 
-The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
-- **Multi-Level Queue / Multi-Level Feedback Queue (MLFQ)**: Configurable multi-tier priority queues with dynamic feedback aging.
+The established architecture cleanly facilitates future extensions:
+- **Multilevel Feedback Queue (MLFQ)**: Multi-tier priority queues with dynamic feedback aging, queue promotion, demotion, and time-allotment tracking.
+- **Interactive CLI & Workload Parsing**: Interactive command-line interface, CSV/JSON workload loading, and comparative summary visualization.
