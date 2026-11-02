@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 4 — Preemptive SRTF Implementation
+## Current Status: Batch 5 — Round Robin (RR) Implementation
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -13,11 +13,12 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **FCFS Scheduling Engine**: Non-preemptive First Come, First Served scheduler (`FcfsScheduler`) with stable tie-breaking and arithmetic overflow protection.
 - [x] **Non-Preemptive SJF Scheduling Engine**: Shortest Job First scheduler (`SjfScheduler`) with dynamic ready queue selection and three-tier deterministic tie-breaking.
 - [x] **Preemptive SRTF Scheduling Engine**: Shortest Remaining Time First scheduler (`SrtfScheduler`) with event-driven simulation, preemption on strictly smaller remaining burst, and deterministic tie-breaking.
+- [x] **Preemptive Round Robin (RR) Scheduling Engine**: Round Robin scheduler (`RrScheduler`) with configurable time quantum, strict FIFO queue rotation, simultaneous arrival handling, timeline normalization, and overflow protection.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **172 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, and metrics.
-- [ ] **Round Robin & Priority Scheduling** *(Planned - Batch 5)*
-- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 6)*
+- [x] **Unit Testing Suite**: **226 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, and Round Robin rotations.
+- [ ] **Priority Scheduling** *(Planned - Batch 6)*
+- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 7)*
 
 ---
 
@@ -65,7 +66,23 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Comparison: FCFS vs. SJF vs. SRTF
+### 4. Round Robin (RR, Preemptive)
+
+- **Philosophy**: Fixed-time-slice preemptive scheduling designed for fair time-sharing. Every ready process is allocated a maximum continuous execution time equal to the **time quantum** ($q$).
+- **FIFO Ready Queue & Rotation**:
+  - Processes are queued in a strict FIFO ready queue.
+  - The process at the head runs for $\min(q, \text{remaining\_burst})$.
+- **Quantum Expiration & Boundary Arrivals**:
+  - When a quantum expires, all processes arriving at or before the expiration timestamp are admitted into the ready queue in stable arrival/input order **before** the preempted process is appended to the tail of the queue.
+  - If a process finishes its execution within or at its quantum, it terminates and is never requeued.
+- **No Unnecessary Context Switches (Normalization)**:
+  - If a process finishes its quantum and no other process is waiting in the ready queue, it retains the CPU.
+  - Consecutive execution slices for the same process are normalized into a single continuous timeline segment.
+- **Complexity**: $O(n \log n)$ time and $O(n)$ space.
+
+---
+
+## Comparison: FCFS vs. SJF vs. SRTF vs. RR
 
 Consider the following benchmark workload:
 
@@ -76,7 +93,7 @@ Consider the following benchmark workload:
 | **P3** | 4 | 1 | 0 |
 | **P4** | 5 | 4 | 0 |
 
-### FCFS Execution
+### 1. FCFS Execution
 - **Order**: P1 (0–7) $\rightarrow$ P2 (7–11) $\rightarrow$ P3 (11–12) $\rightarrow$ P4 (12–16)
 - **Gantt Chart**:
   ```text
@@ -86,36 +103,35 @@ Consider the following benchmark workload:
 - **Average Waiting Time**: **4.75**
 - **Average Turnaround Time**: **8.75**
 
-### SJF (Non-Preemptive) Execution
-- At $t=0$, only P1 is available $\rightarrow$ P1 executes [0, 7].
-- At $t=7$, P2 (burst 4), P3 (burst 1), and P4 (burst 4) have all arrived.
-  - P3 has the shortest burst (1) $\rightarrow$ P3 executes [7, 8].
-  - P2 and P4 both have burst 4; P2 arrived earlier ($t=2$ vs $t=5$) $\rightarrow$ P2 executes [8, 12].
-  - P4 executes [12, 16].
+### 2. SJF (Non-Preemptive) Execution
 - **Order**: P1 (0–7) $\rightarrow$ P3 (7–8) $\rightarrow$ P2 (8–12) $\rightarrow$ P4 (12–16)
 - **Gantt Chart**:
   ```text
   | P1 | P3 | P2 | P4 |
   0    7    8    12   16
   ```
-- **Average Waiting Time**: **4.00** *(15.8% reduction vs FCFS)*
-- **Average Turnaround Time**: **8.00** *(8.6% reduction vs FCFS)*
+- **Average Waiting Time**: **4.00**
+- **Average Turnaround Time**: **8.00**
 
-### SRTF (Preemptive) Execution
-- At $t=0$, P1 begins execution.
-- At $t=2$, P1 has 5 units remaining. P2 arrives with burst 4. Because $4 < 5$, P2 **preempts** P1!
-- At $t=4$, P2 has 2 units remaining. P3 arrives with burst 1. Because $1 < 2$, P3 **preempts** P2!
-- At $t=5$, P3 finishes. P4 arrives with burst 4. Ready queue has P2 (rem 2), P4 (rem 4), and P1 (rem 5). P2 has smallest remaining time $\rightarrow$ P2 resumes and finishes at 7.
-- At $t=7$, P4 (rem 4) has shorter remaining time than P1 (rem 5) $\rightarrow$ P4 runs to completion at 11.
-- At $t=11$, P1 resumes with its remaining 5 units $\rightarrow$ P1 completes at 16.
+### 3. SRTF (Preemptive) Execution
 - **Order**: P1 (0–2) $\rightarrow$ P2 (2–4) $\rightarrow$ P3 (4–5) $\rightarrow$ P2 (5–7) $\rightarrow$ P4 (7–11) $\rightarrow$ P1 (11–16)
 - **Gantt Chart**:
   ```text
   | P1 | P2 | P3 | P2 | P4 | P1 |
   0    2    4    5    7    11   16
   ```
-- **Average Waiting Time**: **3.00** *(36.8% reduction vs FCFS!)*
-- **Average Turnaround Time**: **7.00** *(20.0% reduction vs FCFS!)*
+- **Average Waiting Time**: **3.00**
+- **Average Turnaround Time**: **7.00**
+
+### 4. Round Robin (RR, Quantum = 2) Execution
+- **Order**: P1 (0–2) $\rightarrow$ P2 (2–4) $\rightarrow$ P1 (4–6) $\rightarrow$ P3 (6–7) $\rightarrow$ P2 (7–9) $\rightarrow$ P4 (9–11) $\rightarrow$ P1 (11–13) $\rightarrow$ P4 (13–15) $\rightarrow$ P1 (15–16)
+- **Gantt Chart**:
+  ```text
+  | P1 | P2 | P1 | P3 | P2 | P4 | P1 | P4 | P1 |
+  0    2    4    6    7    9    11   13   15   16
+  ```
+- **Average Waiting Time**: **5.00**
+- **Average Turnaround Time**: **9.00**
 
 ---
 
@@ -189,10 +205,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (172 tests)
+# Debug test suite (226 tests)
 ctest --preset debug-test
 
-# Release test suite (172 tests)
+# Release test suite (226 tests)
 ctest --preset release-test
 ```
 
@@ -218,6 +234,7 @@ CPU Scheduling Simulator/
 ├── vcpkg.json                  # vcpkg manifest defining dependencies (GoogleTest)
 ├── .gitignore                  # Git ignore rules for build artifacts and IDE files
 ├── README.md                   # Project overview, algorithm guide, and instructions
+├── BATCH_5_IMPLEMENTATION_REPORT.md # Batch 5 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -229,6 +246,7 @@ CPU Scheduling Simulator/
 │       ├── fcfs_scheduler.hpp   # FCFS scheduling engine
 │       ├── sjf_scheduler.hpp    # Non-preemptive SJF scheduling engine
 │       ├── srtf_scheduler.hpp   # Preemptive SRTF scheduling engine
+│       ├── rr_scheduler.hpp     # Preemptive Round Robin scheduling engine
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -240,6 +258,7 @@ CPU Scheduling Simulator/
 │   ├── fcfs_scheduler.cpp
 │   ├── sjf_scheduler.cpp
 │   ├── srtf_scheduler.cpp
+│   ├── rr_scheduler.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -248,12 +267,13 @@ CPU Scheduling Simulator/
 │   ├── test_process_validator.cpp # Tests for validation logic (16 tests)
 │   ├── test_fcfs_scheduler.cpp # Tests for FCFS scheduling engine (34 tests)
 │   ├── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
-│   └── test_srtf_scheduler.cpp # Tests for SRTF scheduling engine (63 tests)
+│   ├── test_srtf_scheduler.cpp # Tests for SRTF scheduling engine (63 tests)
+│   └── test_rr_scheduler.cpp   # Tests for Round Robin scheduling engine (54 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation
 │
 └── examples/
     ├── CMakeLists.txt          # Example runner target
-    └── basic_usage.cpp         # Demonstrates FCFS vs SJF vs SRTF comparison and Gantt charts
+    └── basic_usage.cpp         # Demonstrates FCFS vs SJF vs SRTF vs RR comparison
 ```

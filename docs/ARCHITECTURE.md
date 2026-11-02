@@ -1,6 +1,6 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, and SRTF scheduling engines, and planned future algorithm extensions.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, SRTF, and Round Robin scheduling engines, and planned future algorithm extensions.
 
 ---
 
@@ -20,19 +20,20 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2, 3, & 4 Implemented)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2, 3, 4, & 5 Implemented)"]
         ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
         ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
-        Fcfs & Sjf & Srtf --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
-        Fcfs & Sjf & Srtf --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+        ValidationResult -->|Valid| Rr["RrScheduler\n(Preemptive Round Robin)"]
+        Fcfs & Sjf & Srtf & Rr --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
+        Fcfs & Sjf & Srtf & Rr --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
     subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
         Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Batch 2, 3, & 4)"]
+    subgraph PresentationLayer["4. Presentation Layer (Batch 2, 3, 4, & 5)"]
         SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
         SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
     end
@@ -149,18 +150,31 @@ flowchart TD
   - Time complexity: $O(n \log n)$ where $n$ is the number of processes.
   - Space complexity: $O(n)$.
 - **Response Time & Waiting Time Invariants**:
-  - Response time is recorded strictly at the initial CPU execution timestamp ($RT = \text{First Start Time} - \text{Arrival Time}$), remaining constant across subsequent preemptions.
+  - Response time is recorded strictly at the initial CPU execution timestamp ($RT = \text{First Start Time} - \text{Arrival Time}$)$, remaining constant across subsequent preemptions.
   - Total waiting time covers all intervals spent in the ready queue ($WT = TAT - BT$).
 
-### 2.9 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.9 Round Robin Scheduler (`cpu_scheduler::RrScheduler`) — **Implemented (Batch 5)**
+- **Location**: `include/cpu_scheduler/rr_scheduler.hpp`
+- **Role**: Implements preemptive Round Robin (RR) scheduling with a configurable time quantum.
+- **Queue Semantics & Quantum Expiration**:
+  - Maintains a strict FIFO ready queue.
+  - Each process executes for at most the positive time quantum: $\text{slice} = \min(q, \text{remaining\_time})$.
+  - When a quantum expires, any processes arriving at that timestamp are admitted into the ready queue **before** the preempted process is requeued.
+  - If a process finishes its execution, it is permanently marked completed and never requeued.
+- **Timeline Normalization**:
+  - If a process finishes its quantum and no competing process is ready, it retains the CPU.
+  - Consecutive segments for the same process are normalized into a continuous execution segment, avoiding artificial timeline fragments.
+- **Complexity**: $O(n \log n)$ time and $O(n)$ space.
+
+### 2.10 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
-- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically by FCFS, SJF, and SRTF. Naturally formats multiple execution slices per process and idle intervals.
+- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 5+)
+## 3. Future Scheduling Algorithms (Planned for Batches 6+)
 
 The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
 - **Priority Scheduling**: Preemptive and non-preemptive selection using process priority integers.
-- **Round Robin (RR)**: Preemptive time-slicing using a configurable quantum.
+- **Multi-Level Queue / Feedback Queue**: Configurable priority queues with feedback aging.

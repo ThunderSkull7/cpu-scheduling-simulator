@@ -1,6 +1,7 @@
 #include "cpu_scheduler/fcfs_scheduler.hpp"
 #include "cpu_scheduler/gantt_chart.hpp"
 #include "cpu_scheduler/process.hpp"
+#include "cpu_scheduler/rr_scheduler.hpp"
 #include "cpu_scheduler/sjf_scheduler.hpp"
 #include "cpu_scheduler/srtf_scheduler.hpp"
 
@@ -71,7 +72,7 @@ int main() {
     using namespace cpu_scheduler;
 
     std::cout << "=========================================================\n";
-    std::cout << "  CPU Scheduling Simulator — FCFS vs SJF vs SRTF        \n";
+    std::cout << "  CPU Scheduling Simulator — FCFS vs SJF vs SRTF vs RR   \n";
     std::cout << "=========================================================\n\n";
 
     // Standard comparison workload from Batch 3 specification
@@ -110,6 +111,15 @@ int main() {
         display_schedule_result("Shortest Remaining Time First (SRTF, Preemptive)", srtf_outcome.value());
     } else {
         std::cerr << "SRTF failed: " << srtf_outcome.error_message() << "\n";
+    }
+
+    // 4. Run Round Robin (RR, Quantum = 2)
+    constexpr Time rr_quantum = 2;
+    const auto rr_outcome = RrScheduler::run(workload, rr_quantum);
+    if (rr_outcome.has_value()) {
+        display_schedule_result("Round Robin (RR, Quantum = 2)", rr_outcome.value());
+    } else {
+        std::cerr << "Round Robin failed: " << rr_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";
