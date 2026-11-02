@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 7 — Multilevel Queue (MLQ) Scheduling Implementation
+## Current Status: Batch 8 — Multilevel Feedback Queue (MLFQ) Scheduling Implementation
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -17,10 +17,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Non-Preemptive Priority Scheduling Engine**: Priority scheduler (`NonPreemptivePriorityScheduler`) selecting highest-priority ready processes (smaller numerical value = higher priority) with stable tie-breaking.
 - [x] **Preemptive Priority Scheduling Engine**: Priority scheduler (`PreemptivePriorityScheduler`) featuring event-driven simulation, preemption on strictly higher priority (`new_proc.priority < running_proc.priority`), equal-priority non-preemption, and preserved remaining burst times.
 - [x] **Multilevel Queue (MLQ) Scheduling Engine**: Comprehensive multilevel queue scheduler (`MlqScheduler`) featuring multiple independent ready queues, permanent process-to-queue binding, configurable queue algorithms (FCFS, SJF, SRTF, RR, Non-Preemptive Priority, Preemptive Priority), and configurable inter-queue policies (Fixed-Priority Preemptive and Round Robin between queues).
+- [x] **Multilevel Feedback Queue (MLFQ) Scheduling Engine**: Dynamic priority feedback scheduler (`MlfqScheduler`) featuring multiple priority levels, initial Q0 admission, dynamic demotion via per-level CPU allotments, preemption by higher-priority arrivals without allotment reset, configurable periodic priority boosting to prevent starvation, and timeline normalization.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **371 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, Priority scheduling variants, and 77 new MLQ tests.
-- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 8)*
+- [x] **Unit Testing Suite**: **448 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, Priority scheduling variants, 77 MLQ tests, and 77 new MLFQ tests.
+- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 9)*
 
 ---
 
@@ -155,7 +156,27 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Comparison: FCFS vs. SJF vs. SRTF vs. RR vs. Priority
+### 8. Multilevel Feedback Queue (MLFQ) Scheduling
+
+- **Philosophy**: Dynamic priority adjustment based on CPU burst history. Interactive/short jobs receive high priority and fast response, while compute-intensive long jobs gradually sink to lower priority levels with larger time slices.
+- **MLQ vs. MLFQ Distinction**:
+  - In **MLQ**, a process is permanently fixed in its designated queue.
+  - In **MLFQ**, all processes arrive at the top queue (Queue 0) and dynamically migrate down (demoted upon exhausting level CPU allotment) or up (promoted upon periodic priority boost).
+- **Core MLFQ Rules & Invariants**:
+  1. **Rule 1 (Priority Hierarchy)**: If $\text{Priority}(A) < \text{Priority}(B)$ (numerically smaller level index), Process $A$ runs and $B$ does not.
+  2. **Rule 2 (Round Robin within Level)**: If $\text{Priority}(A) == \text{Priority}(B)$, processes share CPU in FIFO Round Robin order using the level's `time_quantum`.
+  3. **Rule 3 (Top Entry)**: When a process enters the system, it is placed at Queue 0.
+  4. **Rule 4 (Dynamic Demotion)**: Once a process uses up its time allotment at a given level (regardless of how many times it yields or gets preempted), its priority is reduced by 1 level ($Q_l \to Q_{l+1}$). Bottom-level processes stay at the bottom level.
+  5. **Rule 5 (Periodic Priority Boost)**: After `boost_interval` time units, all uncompleted processes in the system are moved to Queue 0 and their allotments and quanta are reset, preventing starvation.
+- **Allotment Tracking across Preemptions**:
+  - If a process running at level $l > 0$ is preempted by a new arrival entering Queue 0, the preempted process's accumulated CPU allotment is preserved. It does **not** get a fresh allotment simply by being interrupted.
+  - The preempted process is placed at the front of level $l$'s queue (`push_front`) to resume its slice immediately once higher-priority queues are serviced.
+- **Deterministic Boost & Tie-Breaking**:
+  - At exact boost timestamps, executing processes are interrupted and timeline segments closed.
+  - All uncompleted processes are promoted to Queue 0 in deterministic order:
+    1. Earlier arrival time.
+    2. Original input workload sequence index.
+- **Complexity**: $O(N \log N + \frac{\text{Total Burst}}{\min(q)} + K_{\text{boost}} \cdot N \log N)$ time and $O(N + \frac{\text{Total Burst}}{\min(q)})$ space.
 
 Consider the following benchmark workload:
 
@@ -252,10 +273,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (294 tests)
+# Debug test suite (448 tests)
 ctest --preset debug-test
 
-# Release test suite (294 tests)
+# Release test suite (448 tests)
 ctest --preset release-test
 ```
 
@@ -283,6 +304,8 @@ CPU Scheduling Simulator/
 ├── README.md                   # Project overview, algorithm guide, and instructions
 ├── BATCH_5_IMPLEMENTATION_REPORT.md # Batch 5 implementation report
 ├── BATCH_6_IMPLEMENTATION_REPORT.md # Batch 6 implementation report
+├── BATCH_7_IMPLEMENTATION_REPORT.md # Batch 7 implementation report
+├── BATCH_8_IMPLEMENTATION_REPORT.md # Batch 8 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -296,6 +319,8 @@ CPU Scheduling Simulator/
 │       ├── srtf_scheduler.hpp   # Preemptive SRTF scheduling engine
 │       ├── rr_scheduler.hpp     # Preemptive Round Robin scheduling engine
 │       ├── priority_scheduler.hpp# Priority scheduling engine (Non-Preemptive & Preemptive)
+│       ├── mlq_scheduler.hpp    # Multilevel Queue (MLQ) scheduling engine
+│       ├── mlfq_scheduler.hpp   # Multilevel Feedback Queue (MLFQ) scheduling engine
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -309,6 +334,8 @@ CPU Scheduling Simulator/
 │   ├── srtf_scheduler.cpp
 │   ├── rr_scheduler.cpp
 │   ├── priority_scheduler.cpp
+│   ├── mlq_scheduler.cpp
+│   ├── mlfq_scheduler.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -319,7 +346,9 @@ CPU Scheduling Simulator/
 │   ├── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
 │   ├── test_srtf_scheduler.cpp # Tests for SRTF scheduling engine (63 tests)
 │   ├── test_rr_scheduler.cpp   # Tests for Round Robin scheduling engine (54 tests)
-│   └── test_priority_scheduler.cpp # Tests for Priority scheduling engines (68 tests)
+│   ├── test_priority_scheduler.cpp # Tests for Priority scheduling engines (68 tests)
+│   ├── test_mlq_scheduler.cpp  # Tests for Multilevel Queue scheduling engine (77 tests)
+│   └── test_mlfq_scheduler.cpp # Tests for Multilevel Feedback Queue scheduling engine (77 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation

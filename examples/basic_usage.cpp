@@ -1,5 +1,6 @@
 #include "cpu_scheduler/fcfs_scheduler.hpp"
 #include "cpu_scheduler/gantt_chart.hpp"
+#include "cpu_scheduler/mlfq_scheduler.hpp"
 #include "cpu_scheduler/mlq_scheduler.hpp"
 #include "cpu_scheduler/priority_scheduler.hpp"
 #include "cpu_scheduler/process.hpp"
@@ -175,6 +176,27 @@ int main() {
         display_schedule_result("Multilevel Queue (MLQ: Round Robin Inter-Queue, Quantum = 2)", mlq_rr_outcome.value());
     } else {
         std::cerr << "MLQ Round Robin failed: " << mlq_rr_outcome.error_message() << "\n";
+    }
+
+    // 9. Run Multilevel Feedback Queue (MLFQ)
+    // 3 Queues: Q0 (quantum=2), Q1 (quantum=4), Q2 (quantum=8), Priority Boost = 10
+    MlfqConfig mlfq_config;
+    mlfq_config.add_level(2)
+               .add_level(4)
+               .add_level(8)
+               .set_boost_interval(10);
+
+    const std::vector<Process> mlfq_workload = {
+        Process("Interactive", 0, 3), // finishes quickly after brief Q1 visit
+        Process("ComputeLong", 0, 10), // demoted Q0 -> Q1 -> Q2, boosted at t=10
+        Process("LateArrival", 3, 2)   // arrives at t=3 in Q0, preempts ComputeLong in Q1
+    };
+
+    const auto mlfq_outcome = MlfqScheduler::run(mlfq_workload, mlfq_config);
+    if (mlfq_outcome.has_value()) {
+        display_schedule_result("Multilevel Feedback Queue (MLFQ: Q0=2, Q1=4, Q2=8, Boost=10)", mlfq_outcome.value());
+    } else {
+        std::cerr << "MLFQ failed: " << mlfq_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";

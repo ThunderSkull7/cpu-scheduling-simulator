@@ -20,7 +20,7 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-7 Implemented)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-8 Implemented)"]
         ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
         ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
@@ -28,8 +28,9 @@ flowchart TD
         ValidationResult -->|Valid| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
         ValidationResult -->|Valid| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
         ValidationResult -->|Valid| Mlq["MlqScheduler\n(Multilevel Queue Scheduling)"]
-        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, queue_id, status)"]
-        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+        ValidationResult -->|Valid| Mlfq["MlfqScheduler\n(Multilevel Feedback Queue)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, queue_id, status)"]
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
     subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
@@ -207,15 +208,41 @@ flowchart TD
   6. **Timeline Normalization**: Merges consecutive slices of the same process into unbroken execution segments.
 - **Complexity**: $O(N \log N + K \cdot E)$ for Fixed Priority; $O(N \log N + \frac{B}{Q} \cdot K)$ for Round Robin between queues.
 
-### 2.12 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.12 Multilevel Feedback Queue Scheduler (`cpu_scheduler::MlfqScheduler`) — **Implemented (Batch 8)**
+- **Location**: `include/cpu_scheduler/mlfq_scheduler.hpp`, `src/mlfq_scheduler.cpp`
+- **Role**: Implements Multilevel Feedback Queue (MLFQ) scheduling with dynamic process movement across priority queues.
+- **Architectural Tenets & Mechanisms**:
+  1. **Dynamic Queue Movement vs. Permanent Binding**: Unlike MLQ where processes are statically assigned to queues, MLFQ automatically migrates processes based on CPU consumption.
+  2. **Initial Placement**: Every newly arriving process unconditionally enters Queue 0 (the highest-priority queue).
+  3. **Strict Priority Hierarchy**: Queue 0 is the highest priority; Queue $L-1$ is the lowest. A process at level $k$ is only scheduled if queues $0 \dots k-1$ are empty.
+  4. **Dynamic Demotion via Level Allotment**:
+     - Each queue level $l$ defines a `time_quantum` and an optional `cpu_allotment` (defaulting to the quantum).
+     - When a process accumulates CPU execution at level $l$ equal to that level's allotment, it is demoted to level $l+1$ and appended to the back of the queue.
+     - Bottom-level processes stay at the bottom level upon allotment expiration, rotating to the back of the queue.
+  5. **Allotment Tracking & Preemption Preservation**:
+     - When a process running at level $l > 0$ is preempted by a higher-priority arrival into Queue 0, its consumed allotment and remaining quantum at level $l$ are **not** reset.
+     - The preempted process stays at the head of level $l$ (`push_front`) so it can resume immediately when higher queues empty.
+  6. **Periodic Priority Boosting**:
+     - Prevents starvation of CPU-bound processes. Every `boost_interval` time units ($t = k \times \text{boost\_interval}$), all uncompleted processes are promoted to Queue 0.
+     - Upon boost, all queue levels are cleared, remaining allotments and quantums are reset to level 0 defaults, and processes are queued in Queue 0 sorted deterministically by earlier arrival time, broken by earlier input workload index.
+     - Boost interrupts an executing process at the exact boost timestamp, closing the active timeline segment.
+  7. **Deterministic Tie-Breaking & Event Ordering**:
+     - Deterministic multi-tier ordering: 1. Queue level ($0 < 1 < \dots < L-1$), 2. Queue FIFO position, 3. Earlier arrival time, 4. Workload input sequence index.
+     - Event processing priority at timestamp $t$: 1. Boost event, 2. Process arrivals, 3. Quantum/allotment expiration.
+  8. **Timeline Normalization & Overflow Safety**:
+     - Consecutive slices of the same process are merged into single continuous timeline segments.
+     - All timestamp increments and allotment summations use checked arithmetic (`safe_add`).
+- **Complexity**: $O(N \log N + \frac{\text{Total Burst}}{\min(q)} + K_{\text{boost}} \cdot N \log N)$ time and $O(N + \frac{\text{Total Burst}}{\min(q)})$ space.
+
+### 2.13 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
 - **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 8+)
+## 3. Future Scheduling Simulator Extensions (Batches 9+)
 
 The established architecture cleanly facilitates future extensions:
-- **Multilevel Feedback Queue (MLFQ)**: Multi-tier priority queues with dynamic feedback aging, queue promotion, demotion, and time-allotment tracking.
 - **Interactive CLI & Workload Parsing**: Interactive command-line interface, CSV/JSON workload loading, and comparative summary visualization.
+- **Statistical Analytics & Exporting**: Graph export (SVG/HTML), JSON metrics serialization, and batch statistical benchmarking.
