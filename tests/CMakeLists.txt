@@ -8,6 +8,7 @@ add_executable(cpu_scheduler_tests
     test_priority_scheduler.cpp
     test_mlq_scheduler.cpp
     test_mlfq_scheduler.cpp
+    test_scheduling_engine.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests

@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 8 — Multilevel Feedback Queue (MLFQ) Scheduling Implementation
+## Current Status: Batch 9 — Unified Scheduling Engine
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -18,10 +18,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Preemptive Priority Scheduling Engine**: Priority scheduler (`PreemptivePriorityScheduler`) featuring event-driven simulation, preemption on strictly higher priority (`new_proc.priority < running_proc.priority`), equal-priority non-preemption, and preserved remaining burst times.
 - [x] **Multilevel Queue (MLQ) Scheduling Engine**: Comprehensive multilevel queue scheduler (`MlqScheduler`) featuring multiple independent ready queues, permanent process-to-queue binding, configurable queue algorithms (FCFS, SJF, SRTF, RR, Non-Preemptive Priority, Preemptive Priority), and configurable inter-queue policies (Fixed-Priority Preemptive and Round Robin between queues).
 - [x] **Multilevel Feedback Queue (MLFQ) Scheduling Engine**: Dynamic priority feedback scheduler (`MlfqScheduler`) featuring multiple priority levels, initial Q0 admission, dynamic demotion via per-level CPU allotments, preemption by higher-priority arrivals without allotment reset, configurable periodic priority boosting to prevent starvation, and timeline normalization.
+- [x] **Unified Scheduling Engine & Central Dispatcher**: Type-safe central execution dispatcher (`SchedulingEngine` / `UnifiedScheduler`) supporting uniform execution of all 8 algorithms through a consistent `SchedulingRequest` interface, configuration validation, introspection, and result compatibility.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **448 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, Round Robin rotations, Priority scheduling variants, 77 MLQ tests, and 77 new MLFQ tests.
-- [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 9)*
+- [x] **Unit Testing Suite**: **487 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, and 39 comprehensive integration tests for the unified scheduling engine.
+- [ ] **Interactive CLI & Workload Parsing** *(Planned - Batch 10)*
 
 ---
 
@@ -178,6 +179,27 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
     2. Original input workload sequence index.
 - **Complexity**: $O(N \log N + \frac{\text{Total Burst}}{\min(q)} + K_{\text{boost}} \cdot N \log N)$ time and $O(N + \frac{\text{Total Burst}}{\min(q)})$ space.
 
+---
+
+### 9. Unified Scheduling Engine (`SchedulingEngine` / `UnifiedScheduler`)
+
+- **Philosophy**: Common dispatch and execution facade decoupling callers (CLI, reporting, comparison benchmarks) from concrete scheduler implementations.
+- **Unified Algorithm Selection**: `enum class SchedulingAlgorithm` strictly distinguishes all 8 algorithm variants (`Fcfs`, `Sjf`, `Srtf`, `RoundRobin`, `NonPreemptivePriority`, `PreemptivePriority`, `MultilevelQueue`, `MultilevelFeedbackQueue`).
+- **Type-Safe Scheduling Request (`SchedulingRequest`)**:
+  - Encapsulates target algorithm, workload, and algorithm-specific configuration in `std::variant<std::monostate, RoundRobinConfig, MlqWorkload, MlfqConfig>`.
+  - Convenient static factories (`SchedulingRequest::fcfs()`, `round_robin()`, `mlq()`, `mlfq()`, etc.) and fluent builder methods.
+- **Strict Dispatch Validation**:
+  - Rejects irrelevant configurations passed to non-configurable algorithms.
+  - Validates required configuration parameters (e.g. positive Round Robin quantum, valid MLQ workload, valid MLFQ tiers).
+  - Preserves underlying scheduler return types (`ScheduleOutcome`, `SchedulingResult`, `ScheduleError`).
+- **Zero Overhead & Full Parity**:
+  - Dispatches directly to underlying schedulers with zero algorithmic duplication.
+  - Returns identical execution timelines, per-process metrics, and aggregate statistics.
+
+---
+
+## Algorithm Comparison Benchmarks
+
 Consider the following benchmark workload:
 
 | Process | Arrival Time | Burst Time | Priority |
@@ -273,10 +295,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (448 tests)
+# Debug test suite (487 tests)
 ctest --preset debug-test
 
-# Release test suite (448 tests)
+# Release test suite (487 tests)
 ctest --preset release-test
 ```
 
@@ -306,6 +328,7 @@ CPU Scheduling Simulator/
 ├── BATCH_6_IMPLEMENTATION_REPORT.md # Batch 6 implementation report
 ├── BATCH_7_IMPLEMENTATION_REPORT.md # Batch 7 implementation report
 ├── BATCH_8_IMPLEMENTATION_REPORT.md # Batch 8 implementation report
+├── BATCH_9_IMPLEMENTATION_REPORT.md # Batch 9 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -321,6 +344,7 @@ CPU Scheduling Simulator/
 │       ├── priority_scheduler.hpp# Priority scheduling engine (Non-Preemptive & Preemptive)
 │       ├── mlq_scheduler.hpp    # Multilevel Queue (MLQ) scheduling engine
 │       ├── mlfq_scheduler.hpp   # Multilevel Feedback Queue (MLFQ) scheduling engine
+│       ├── scheduling_engine.hpp# Unified scheduling engine & central dispatcher
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -336,6 +360,7 @@ CPU Scheduling Simulator/
 │   ├── priority_scheduler.cpp
 │   ├── mlq_scheduler.cpp
 │   ├── mlfq_scheduler.cpp
+│   ├── scheduling_engine.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -348,7 +373,8 @@ CPU Scheduling Simulator/
 │   ├── test_rr_scheduler.cpp   # Tests for Round Robin scheduling engine (54 tests)
 │   ├── test_priority_scheduler.cpp # Tests for Priority scheduling engines (68 tests)
 │   ├── test_mlq_scheduler.cpp  # Tests for Multilevel Queue scheduling engine (77 tests)
-│   └── test_mlfq_scheduler.cpp # Tests for Multilevel Feedback Queue scheduling engine (77 tests)
+│   ├── test_mlfq_scheduler.cpp # Tests for Multilevel Feedback Queue scheduling engine (77 tests)
+│   └── test_scheduling_engine.cpp # Tests for Unified Scheduling Engine & Dispatcher (39 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation

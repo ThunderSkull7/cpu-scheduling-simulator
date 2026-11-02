@@ -20,24 +20,28 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batches 2-8 Implemented)"]
-        ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
-        ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
-        ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
-        ValidationResult -->|Valid| Rr["RrScheduler\n(Preemptive Round Robin)"]
-        ValidationResult -->|Valid| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
-        ValidationResult -->|Valid| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
-        ValidationResult -->|Valid| Mlq["MlqScheduler\n(Multilevel Queue Scheduling)"]
-        ValidationResult -->|Valid| Mlfq["MlfqScheduler\n(Multilevel Feedback Queue)"]
+    subgraph UnifiedLayer["2. Unified Scheduling Engine (Batch 9)"]
+        SchedulingRequest["SchedulingRequest\n(algorithm, workload, config)"] --> SchedulingEngine["SchedulingEngine / UnifiedScheduler\n(central dispatcher & validation)"]
+    end
+
+    subgraph SimulationLayer["3. Scheduling Simulation Engines (Batches 2-8 Implemented)"]
+        SchedulingEngine -->|Dispatch| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
+        SchedulingEngine -->|Dispatch| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
+        SchedulingEngine -->|Dispatch| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
+        SchedulingEngine -->|Dispatch| Rr["RrScheduler\n(Preemptive Round Robin)"]
+        SchedulingEngine -->|Dispatch| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
+        SchedulingEngine -->|Dispatch| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
+        SchedulingEngine -->|Dispatch| Mlq["MlqScheduler\n(Multilevel Queue Scheduling)"]
+        SchedulingEngine -->|Dispatch| Mlfq["MlfqScheduler\n(Multilevel Feedback Queue)"]
         Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, queue_id, status)"]
         Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
-    subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
+    subgraph AnalyticsLayer["4. Results & Metrics Engine (Batch 2)"]
         Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Batches 2-6)"]
+    subgraph PresentationLayer["5. Presentation Layer (Batches 2-9)"]
         SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
         SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
     end
@@ -234,14 +238,27 @@ flowchart TD
      - All timestamp increments and allotment summations use checked arithmetic (`safe_add`).
 - **Complexity**: $O(N \log N + \frac{\text{Total Burst}}{\min(q)} + K_{\text{boost}} \cdot N \log N)$ time and $O(N + \frac{\text{Total Burst}}{\min(q)})$ space.
 
-### 2.13 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.13 Unified Scheduling Engine (`cpu_scheduler::SchedulingEngine` / `UnifiedScheduler`) — **Implemented (Batch 9)**
+- **Location**: `include/cpu_scheduler/scheduling_engine.hpp`, `src/scheduling_engine.cpp`
+- **Role**: Common facade and central dispatcher decoupling callers from underlying scheduler specifics.
+- **Architectural Responsibilities**:
+  1. **Algorithm Selection**: `enum class SchedulingAlgorithm` strictly differentiates all 8 algorithm implementations.
+  2. **Type-Safe Request Container**: `SchedulingRequest` encapsulates algorithm selection, input workload, and algorithm-specific configuration in `std::variant<std::monostate, RoundRobinConfig, MlqWorkload, MlfqConfig>`.
+  3. **Configuration Routing & Validation**:
+     - Enforces that non-configurable algorithms receive `std::monostate` and rejects irrelevant configuration.
+     - Validates that Round Robin receives positive quantum via `RoundRobinConfig`.
+     - Validates that MLQ receives `MlqWorkload` and MLFQ receives `MlfqConfig`.
+  4. **Zero Duplication & Full Compatibility**: Directly executes existing schedulers and preserves structured outcomes (`ScheduleOutcome`, `SchedulingResult`, `ScheduleError`).
+  5. **Introspection Helpers**: Provides reflection and string conversion utilities (`to_string`, `algorithm_name`, `algorithm_from_string`, `supported_algorithms`).
+
+### 2.14 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
 - **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Simulator Extensions (Batches 9+)
+## 3. Future Scheduling Simulator Extensions (Batches 10+)
 
 The established architecture cleanly facilitates future extensions:
 - **Interactive CLI & Workload Parsing**: Interactive command-line interface, CSV/JSON workload loading, and comparative summary visualization.

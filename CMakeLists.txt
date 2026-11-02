@@ -30,6 +30,7 @@ add_library(cpu_scheduler_lib
     src/priority_scheduler.cpp
     src/mlq_scheduler.cpp
     src/mlfq_scheduler.cpp
+    src/scheduling_engine.cpp
     src/gantt_chart.cpp
 )
 

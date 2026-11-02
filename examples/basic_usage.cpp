@@ -5,6 +5,7 @@
 #include "cpu_scheduler/priority_scheduler.hpp"
 #include "cpu_scheduler/process.hpp"
 #include "cpu_scheduler/rr_scheduler.hpp"
+#include "cpu_scheduler/scheduling_engine.hpp"
 #include "cpu_scheduler/sjf_scheduler.hpp"
 #include "cpu_scheduler/srtf_scheduler.hpp"
 
@@ -197,6 +198,16 @@ int main() {
         display_schedule_result("Multilevel Feedback Queue (MLFQ: Q0=2, Q1=4, Q2=8, Boost=10)", mlfq_outcome.value());
     } else {
         std::cerr << "MLFQ failed: " << mlfq_outcome.error_message() << "\n";
+    }
+
+    // 10. Run Unified Scheduling Engine (Demonstrating Unified Dispatch)
+    const auto unified_request = SchedulingRequest::round_robin(workload, 2);
+    const auto unified_outcome = SchedulingEngine::execute(unified_request);
+    if (unified_outcome.has_value()) {
+        display_schedule_result("Unified Scheduling Engine Dispatch: Round Robin (RR, Quantum = 2)",
+                                unified_outcome.value());
+    } else {
+        std::cerr << "Unified Scheduling Engine failed: " << unified_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";
