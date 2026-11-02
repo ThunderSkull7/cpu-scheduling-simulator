@@ -1,6 +1,6 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS and SJF scheduling engines, and planned future algorithm extensions.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, and SRTF scheduling engines, and planned future algorithm extensions.
 
 ---
 
@@ -20,18 +20,19 @@ flowchart TD
         Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
     end
 
-    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2 & 3 Implemented)"]
+    subgraph SimulationLayer["2. Scheduling Simulation Engine (Batch 2, 3, & 4 Implemented)"]
         ValidationResult -->|Valid| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         ValidationResult -->|Valid| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
-        Fcfs & Sjf --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
-        Fcfs & Sjf --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
+        ValidationResult -->|Valid| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
+        Fcfs & Sjf & Srtf --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
+        Fcfs & Sjf & Srtf --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
     subgraph AnalyticsLayer["3. Results & Metrics Engine (Batch 2)"]
         Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
     end
 
-    subgraph PresentationLayer["4. Presentation Layer (Batch 2 & 3)"]
+    subgraph PresentationLayer["4. Presentation Layer (Batch 2, 3, & 4)"]
         SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
         SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
     end
@@ -92,6 +93,7 @@ flowchart TD
 - **Rules**:
   - CPU idle intervals are recorded explicitly (`SegmentType::Idle`).
   - Zero-length idle intervals are prohibited (e.g., when a process arrives at the exact time the previous finishes).
+  - Multiple execution segments for a single process are naturally supported when preemption occurs.
 
 ### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/scheduling_result.hpp`
@@ -132,16 +134,33 @@ flowchart TD
   - Unarrived processes cannot be selected regardless of burst time.
   - Implemented using an initial $O(n \log n)$ sort by arrival time and a min-priority queue for ready processes. Overall complexity is $O(n \log n)$ time and $O(n)$ space.
 
-### 2.8 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
+### 2.8 SRTF Scheduler (`cpu_scheduler::SrtfScheduler`) — **Implemented (Batch 4)**
+- **Location**: `include/cpu_scheduler/srtf_scheduler.hpp`
+- **Role**: Implements preemptive Shortest Remaining Time First (SRTF) scheduling.
+- **Preemption Rule**:
+  - A running process is preempted **if and only if** another ready process has a **strictly smaller** remaining execution time (`competing.remaining_time < running.remaining_time`).
+  - Equal remaining times do not cause preemption, preventing unnecessary context switching.
+- **Three-Tier Deterministic Tie-Breaking**:
+  1. Smallest `remaining_time`.
+  2. Earlier `arrival_time`.
+  3. Original input sequence index.
+- **Event-Driven Engine**:
+  - Jumps directly between discrete scheduling events (process arrivals and slice completions).
+  - Time complexity: $O(n \log n)$ where $n$ is the number of processes.
+  - Space complexity: $O(n)$.
+- **Response Time & Waiting Time Invariants**:
+  - Response time is recorded strictly at the initial CPU execution timestamp ($RT = \text{First Start Time} - \text{Arrival Time}$), remaining constant across subsequent preemptions.
+  - Total waiting time covers all intervals spent in the ready queue ($WT = TAT - BT$).
+
+### 2.9 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
 - **Location**: `include/cpu_scheduler/gantt_chart.hpp`
 - **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
-- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically by both FCFS and SJF.
+- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically by FCFS, SJF, and SRTF. Naturally formats multiple execution slices per process and idle intervals.
 
 ---
 
-## 3. Future Scheduling Algorithms (Planned for Batches 4+)
+## 3. Future Scheduling Algorithms (Planned for Batches 5+)
 
 The established architecture cleanly facilitates future algorithms by implementing identical signatures (`schedule(std::span<const Process>)` returning `ScheduleOutcome`):
-- **Shortest Remaining Time First (SRTF)**: Preemptive SJF with preemption points at new arrivals.
 - **Priority Scheduling**: Preemptive and non-preemptive selection using process priority integers.
 - **Round Robin (RR)**: Preemptive time-slicing using a configurable quantum.

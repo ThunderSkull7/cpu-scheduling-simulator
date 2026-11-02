@@ -2,6 +2,7 @@
 #include "cpu_scheduler/gantt_chart.hpp"
 #include "cpu_scheduler/process.hpp"
 #include "cpu_scheduler/sjf_scheduler.hpp"
+#include "cpu_scheduler/srtf_scheduler.hpp"
 
 #include <iomanip>
 #include <iostream>
@@ -70,7 +71,7 @@ int main() {
     using namespace cpu_scheduler;
 
     std::cout << "=========================================================\n";
-    std::cout << "   CPU Scheduling Simulator — Batch 3: FCFS vs SJF       \n";
+    std::cout << "  CPU Scheduling Simulator — FCFS vs SJF vs SRTF        \n";
     std::cout << "=========================================================\n\n";
 
     // Standard comparison workload from Batch 3 specification
@@ -101,6 +102,14 @@ int main() {
         display_schedule_result("Shortest Job First (SJF, Non-Preemptive)", sjf_outcome.value());
     } else {
         std::cerr << "SJF failed: " << sjf_outcome.error_message() << "\n";
+    }
+
+    // 3. Run SRTF (Preemptive SJF)
+    const auto srtf_outcome = SrtfScheduler::run(workload);
+    if (srtf_outcome.has_value()) {
+        display_schedule_result("Shortest Remaining Time First (SRTF, Preemptive)", srtf_outcome.value());
+    } else {
+        std::cerr << "SRTF failed: " << srtf_outcome.error_message() << "\n";
     }
 
     std::cout << "=========================================================\n";

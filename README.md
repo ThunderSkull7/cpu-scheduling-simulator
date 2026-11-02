@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 3 — Non-Preemptive SJF Implementation
+## Current Status: Batch 4 — Preemptive SRTF Implementation
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -12,10 +12,10 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Execution Timeline**: Complete execution history (`ExecutionSegment`) with explicit CPU idle tracking.
 - [x] **FCFS Scheduling Engine**: Non-preemptive First Come, First Served scheduler (`FcfsScheduler`) with stable tie-breaking and arithmetic overflow protection.
 - [x] **Non-Preemptive SJF Scheduling Engine**: Shortest Job First scheduler (`SjfScheduler`) with dynamic ready queue selection and three-tier deterministic tie-breaking.
+- [x] **Preemptive SRTF Scheduling Engine**: Shortest Remaining Time First scheduler (`SrtfScheduler`) with event-driven simulation, preemption on strictly smaller remaining burst, and deterministic tie-breaking.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
-- [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`).
-- [x] **Unit Testing Suite**: **109 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, and metrics.
-- [ ] **Shortest Remaining Time First (SRTF)** *(Planned - Batch 4)*
+- [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
+- [x] **Unit Testing Suite**: **172 GoogleTest unit tests** covering all model invariants, validation rules, FCFS, SJF dynamic queue edge cases, SRTF preemptions, and metrics.
 - [ ] **Round Robin & Priority Scheduling** *(Planned - Batch 5)*
 - [ ] **Interactive CLI & Algorithm Comparison** *(Planned - Batch 6)*
 
@@ -45,7 +45,27 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Comparison: FCFS vs. SJF
+### 3. Shortest Remaining Time First (SRTF, Preemptive)
+
+- **Philosophy**: Preemptive variant of Shortest Job First. At each scheduling decision, the CPU executes the process with the smallest remaining execution time among all arrived, uncompleted processes.
+- **Strict Preemption Rule**:
+  - The currently executing process is preempted **if and only if** a competing ready process has a **strictly smaller** remaining execution time (`competing.remaining_time < running.remaining_time`).
+  - Equal remaining times do **not** trigger preemption; the running process retains the CPU to avoid redundant context switches.
+- **Deterministic Tie-Breaking Rules**:
+  1. **Primary**: Shorter remaining execution time.
+  2. **Secondary**: Earlier arrival time.
+  3. **Tertiary**: Original input workload sequence index.
+- **Event-Driven Simulation Engine**:
+  - Jumps directly between discrete scheduling events (process arrivals and slice completions) rather than iterating through individual time units ($O(1)$ per step).
+  - Time complexity: $O(n \log n)$ where $n$ is the number of processes.
+  - Space complexity: $O(n)$.
+- **Response Time & Waiting Time Integrity**:
+  - Response time is strictly recorded from process arrival until its *first* CPU slice allocation ($RT = \text{First Start Time} - \text{Arrival Time}$), remaining unchanged across subsequent preemptions.
+  - Waiting time accurately aggregates all periods spent in the ready queue ($WT = TAT - BT$).
+
+---
+
+## Comparison: FCFS vs. SJF vs. SRTF
 
 Consider the following benchmark workload:
 
@@ -66,7 +86,7 @@ Consider the following benchmark workload:
 - **Average Waiting Time**: **4.75**
 - **Average Turnaround Time**: **8.75**
 
-### SJF Execution
+### SJF (Non-Preemptive) Execution
 - At $t=0$, only P1 is available $\rightarrow$ P1 executes [0, 7].
 - At $t=7$, P2 (burst 4), P3 (burst 1), and P4 (burst 4) have all arrived.
   - P3 has the shortest burst (1) $\rightarrow$ P3 executes [7, 8].
@@ -78,8 +98,24 @@ Consider the following benchmark workload:
   | P1 | P3 | P2 | P4 |
   0    7    8    12   16
   ```
-- **Average Waiting Time**: **4.00** *(15.8% reduction in waiting time!)*
-- **Average Turnaround Time**: **8.00** *(8.6% reduction in turnaround time!)*
+- **Average Waiting Time**: **4.00** *(15.8% reduction vs FCFS)*
+- **Average Turnaround Time**: **8.00** *(8.6% reduction vs FCFS)*
+
+### SRTF (Preemptive) Execution
+- At $t=0$, P1 begins execution.
+- At $t=2$, P1 has 5 units remaining. P2 arrives with burst 4. Because $4 < 5$, P2 **preempts** P1!
+- At $t=4$, P2 has 2 units remaining. P3 arrives with burst 1. Because $1 < 2$, P3 **preempts** P2!
+- At $t=5$, P3 finishes. P4 arrives with burst 4. Ready queue has P2 (rem 2), P4 (rem 4), and P1 (rem 5). P2 has smallest remaining time $\rightarrow$ P2 resumes and finishes at 7.
+- At $t=7$, P4 (rem 4) has shorter remaining time than P1 (rem 5) $\rightarrow$ P4 runs to completion at 11.
+- At $t=11$, P1 resumes with its remaining 5 units $\rightarrow$ P1 completes at 16.
+- **Order**: P1 (0–2) $\rightarrow$ P2 (2–4) $\rightarrow$ P3 (4–5) $\rightarrow$ P2 (5–7) $\rightarrow$ P4 (7–11) $\rightarrow$ P1 (11–16)
+- **Gantt Chart**:
+  ```text
+  | P1 | P2 | P3 | P2 | P4 | P1 |
+  0    2    4    5    7    11   16
+  ```
+- **Average Waiting Time**: **3.00** *(36.8% reduction vs FCFS!)*
+- **Average Turnaround Time**: **7.00** *(20.0% reduction vs FCFS!)*
 
 ---
 
@@ -89,10 +125,10 @@ For each process $i$:
 
 | Metric | Formula | Description |
 | :--- | :--- | :--- |
-| **Completion Time ($CT$)** | $Start\ Time + Burst\ Time$ | Timestamp at which the process finishes execution. |
-| **Turnaround Time ($TAT$)** | $Completion\ Time - Arrival\ Time$ | Total elapsed time from arrival to termination. |
-| **Waiting Time ($WT$)** | $Turnaround\ Time - Burst\ Time$ | Total time the process spent waiting in the ready queue. |
-| **Response Time ($RT$)** | $First\ Start\ Time - Arrival\ Time$ | Time from arrival until first execution ($RT = WT$ for non-preemptive algorithms). |
+| **Completion Time ($CT$)** | Timestamp at process termination | Simulation clock time when remaining execution reaches zero. |
+| **Turnaround Time ($TAT$)** | $Completion\ Time - Arrival\ Time$ | Total elapsed duration from process arrival to termination. |
+| **Waiting Time ($WT$)** | $Turnaround\ Time - Burst\ Time$ | Total cumulative duration the process waited in the ready queue. |
+| **Response Time ($RT$)** | $First\ Start\ Time - Arrival\ Time$ | Duration from arrival until initial CPU allocation. |
 
 ### Aggregate Performance Metrics
 
@@ -153,10 +189,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (109 tests)
+# Debug test suite (172 tests)
 ctest --preset debug-test
 
-# Release test suite (109 tests)
+# Release test suite (172 tests)
 ctest --preset release-test
 ```
 
@@ -192,6 +228,7 @@ CPU Scheduling Simulator/
 │       ├── scheduling_result.hpp# Results container & error handling
 │       ├── fcfs_scheduler.hpp   # FCFS scheduling engine
 │       ├── sjf_scheduler.hpp    # Non-preemptive SJF scheduling engine
+│       ├── srtf_scheduler.hpp   # Preemptive SRTF scheduling engine
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -202,6 +239,7 @@ CPU Scheduling Simulator/
 │   ├── scheduling_result.cpp
 │   ├── fcfs_scheduler.cpp
 │   ├── sjf_scheduler.cpp
+│   ├── srtf_scheduler.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -209,12 +247,13 @@ CPU Scheduling Simulator/
 │   ├── test_process.cpp        # Tests for process data model (7 tests)
 │   ├── test_process_validator.cpp # Tests for validation logic (16 tests)
 │   ├── test_fcfs_scheduler.cpp # Tests for FCFS scheduling engine (34 tests)
-│   └── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
+│   ├── test_sjf_scheduler.cpp  # Tests for SJF scheduling engine (52 tests)
+│   └── test_srtf_scheduler.cpp # Tests for SRTF scheduling engine (63 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation
 │
 └── examples/
     ├── CMakeLists.txt          # Example runner target
-    └── basic_usage.cpp         # Demonstrates FCFS vs SJF comparison and Gantt charts
+    └── basic_usage.cpp         # Demonstrates FCFS vs SJF vs SRTF comparison and Gantt charts
 ```
