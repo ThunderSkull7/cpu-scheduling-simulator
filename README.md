@@ -24,7 +24,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Dedicated Results Presentation Engine**: Modular formatting engine (`ResultsRenderer`) delivering structured Simulation Summaries, aligned tabular process execution details, aggregate metrics, chronological timelines, and integrated full reports.
 - [x] **RFC 4180 CSV Engine**: Built-in compliant CSV parser (`CsvParser`) supporting quoted fields, escaped quotes (`""`), embedded commas, CRLF/LF line endings, and syntax error detection.
 - [x] **Workload CSV Importer**: Type-safe workload ingestion engine (`WorkloadImporter`) supporting required (`process_id`, `arrival_time`, `burst_time`) and optional (`priority`, `queue_id`) columns, case-insensitive headers, trimmed whitespace, all-or-nothing validation, duplicate ID rejection, and row diagnostics.
-- [x] **Results CSV Exporter**: Robust export engine (`CsvExporter`) producing spreadsheet-compatible process execution metrics and chronological execution timeline CSVs with formula injection mitigation (`=`, `+`, `-`, `@`) and safe atomic file writing.
+- [x] **Results CSV Exporter**: Robust export engine (`CsvExporter`) producing spreadsheet-compatible process execution metrics and chronological execution timeline CSVs with formula injection mitigation (`=`, `+`, `-`, `@`) and safe staged file replacement (via `ReplaceFileW` on Windows).
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Unit Testing Suite**: **571 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, interactive CLI workflows, Gantt chart layouts, results formatting, CSV parser, workload importer, results exporter, security injection defense, and CLI CSV workflows.*
 
@@ -493,7 +493,7 @@ P3,2,8,3,Q_Low
 - **Process Metrics CSV**: Exports `process_id,arrival_time,burst_time,completion_time,turnaround_time,waiting_time,response_time,priority,queue_id` suitable for spreadsheet analysis.
 - **Timeline CSV**: Exports `start_time,end_time,process_id,queue_id` with explicit `IDLE` intervals and preserved chronological order.
 - **Formula Injection Mitigation**: Text fields (`process_id`, `queue_id`) beginning with `=`, `+`, `-`, or `@` are neutralized with an apostrophe prefix (`'`) at export boundaries. Numeric columns (`arrival_time`, `burst_time`, `priority`, etc.) remain pure numbers and in-memory results are unmodified.
-- **Safe File Writing**: Export operations write to a temporary file (`.tmp`) before atomic replacement, guarding against interrupted writes or corrupted files.
+- **Safe File Writing**: Export operations write to a temporary file (`.tmp`) before in-place transactional replacement (via `ReplaceFileW` on Windows), guarding against interrupted writes, preventing partial files, and preserving original files if replacement fails.
 
 ### 3. Sample CSV Files
 - [`sample_workload.csv`](file:///examples/sample_workload.csv): Basic FCFS/SJF/SRTF/RR workload without priorities.

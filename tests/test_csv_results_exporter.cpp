@@ -8,6 +8,16 @@
 #include <sstream>
 #include <string>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace cpu_scheduler {
 namespace {
 
@@ -157,6 +167,212 @@ TEST(CsvExporterTest, FileExportOverwriteFalseFailsWhenTargetExists) {
     EXPECT_NE(res2.error_message.find("Destination file already exists"), std::string::npos);
 
     // Clean up
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+
+TEST(CsvExporterTest, FileExportToNewDestinationVerifiesContentAndNoTempLeftover) {
+    const std::vector<Process> workload = { Process("P1", 0, 4) };
+    auto outcome = FcfsScheduler::run(workload);
+    ASSERT_TRUE(outcome.has_value());
+
+    std::filesystem::path file = "test_export_new_dest.csv";
+    std::filesystem::path temp_file = "test_export_new_dest.csv.tmp";
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+    std::filesystem::remove(temp_file, ec);
+
+    auto res = CsvExporter::export_process_metrics_to_file(file, outcome.value(), false);
+    EXPECT_TRUE(res.success);
+    EXPECT_TRUE(std::filesystem::exists(file));
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+    // Verify file content has header and process data
+    std::ifstream in(file);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_NE(content.find("process_id,arrival_time,burst_time"), std::string::npos);
+    EXPECT_NE(content.find("P1,0,4,4,4,0,0"), std::string::npos);
+    in.close();
+
+    std::filesystem::remove(file, ec);
+}
+
+TEST(CsvExporterTest, FileExportOverwriteDisabledPreservesOriginalFileContent) {
+    const std::vector<Process> workload = { Process("P1", 0, 3) };
+    auto outcome = FcfsScheduler::run(workload);
+    ASSERT_TRUE(outcome.has_value());
+
+    std::filesystem::path file = "test_preserve_on_overwrite_false.csv";
+    std::filesystem::path temp_file = "test_preserve_on_overwrite_false.csv.tmp";
+
+    const std::string original_data = "PRESERVED_USER_DATA_DO_NOT_CORRUPT";
+    {
+        std::ofstream out(file);
+        out << original_data;
+    }
+
+    auto res = CsvExporter::export_process_metrics_to_file(file, outcome.value(), false);
+    EXPECT_FALSE(res.success);
+    EXPECT_NE(res.error_message.find("Destination file already exists"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+    // Verify original content was NOT destroyed or overwritten
+    std::ifstream in(file);
+    std::string read_back;
+    in >> read_back;
+    EXPECT_EQ(read_back, original_data);
+    in.close();
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+TEST(CsvExporterTest, FileExportOverwriteEnabledReplacesContentCleanly) {
+    const std::vector<Process> workload = { Process("P_NEW", 0, 5) };
+    auto outcome = FcfsScheduler::run(workload);
+    ASSERT_TRUE(outcome.has_value());
+
+    std::filesystem::path file = "test_safe_overwrite_replace.csv";
+    std::filesystem::path temp_file = "test_safe_overwrite_replace.csv.tmp";
+
+    const std::string stale_data = "STALE_DATA_12345";
+    {
+        std::ofstream out(file);
+        out << stale_data;
+    }
+
+    auto res = CsvExporter::export_process_metrics_to_file(file, outcome.value(), true);
+    EXPECT_TRUE(res.success);
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+    // Verify file now contains new CSV content and no stale data
+    std::ifstream in(file);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content.find(stale_data), std::string::npos);
+    EXPECT_NE(content.find("P_NEW,0,5,5,5,0,0"), std::string::npos);
+    in.close();
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+TEST(CsvExporterTest, FileExportReplacementFailurePreservesDestinationAndCleansUpTemp) {
+    const std::vector<Process> workload = { Process("P_FAIL", 0, 2) };
+    auto outcome = FcfsScheduler::run(workload);
+    ASSERT_TRUE(outcome.has_value());
+
+    std::filesystem::path file = "test_replace_failure_guard.csv";
+    std::filesystem::path temp_file = "test_replace_failure_guard.csv.tmp";
+
+    const std::string original_data = "CRITICAL_UNTOUCHED_CONTENT";
+    {
+        std::ofstream out(file);
+        out << original_data;
+    }
+
+#ifdef _WIN32
+    // Mark the destination file read-only so ReplaceFileW fails deterministically with access denied
+    DWORD old_attrs = GetFileAttributesW(file.c_str());
+    ASSERT_NE(old_attrs, INVALID_FILE_ATTRIBUTES);
+    SetFileAttributesW(file.c_str(), old_attrs | FILE_ATTRIBUTE_READONLY);
+
+    auto res = CsvExporter::export_process_metrics_to_file(file, outcome.value(), true);
+
+    // Replacement must fail
+    EXPECT_FALSE(res.success);
+    EXPECT_FALSE(res.error_message.empty());
+
+    // Restore attributes before verification & cleanup
+    SetFileAttributesW(file.c_str(), old_attrs);
+#endif
+
+    // Crucial check: Destination file still exists and its original content is strictly preserved!
+    std::ifstream in(file);
+    std::string read_back;
+    in >> read_back;
+    EXPECT_EQ(read_back, original_data);
+    in.close();
+
+    // Crucial check: Temporary file was deleted and not left behind
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+TEST(CsvExporterTest, TimelineFileExportSafeReplacementAndContentVerification) {
+    const std::vector<ExecutionSegment> timeline = {
+        ExecutionSegment::idle(0, 1),
+        ExecutionSegment::process("P1", 1, 3)
+    };
+    std::vector<ProcessState> states = {
+        ProcessState::from_process(Process("P1", 1, 2))
+    };
+    SchedulingMetrics metrics;
+    SchedulingResult result(timeline, states, metrics);
+
+    std::filesystem::path file = "test_timeline_safe_replace.csv";
+    std::filesystem::path temp_file = "test_timeline_safe_replace.csv.tmp";
+
+    const std::string stale_data = "OLD_TIMELINE_STALE";
+    {
+        std::ofstream out(file);
+        out << stale_data;
+    }
+
+    auto res = CsvExporter::export_timeline_to_file(file, result, true);
+    EXPECT_TRUE(res.success);
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+    std::ifstream in(file);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content.find(stale_data), std::string::npos);
+    EXPECT_NE(content.find("start_time,end_time,process_id"), std::string::npos);
+    EXPECT_NE(content.find("0,1,IDLE,"), std::string::npos);
+    EXPECT_NE(content.find("1,3,P1,"), std::string::npos);
+    in.close();
+
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+
+TEST(CsvExporterTest, TimelineFileExportReplacementFailurePreservesDestination) {
+    const std::vector<ExecutionSegment> timeline = {
+        ExecutionSegment::process("P1", 0, 2)
+    };
+    SchedulingResult result(timeline, {}, {});
+
+    std::filesystem::path file = "test_timeline_replace_fail.csv";
+    std::filesystem::path temp_file = "test_timeline_replace_fail.csv.tmp";
+
+    const std::string original_data = "ORIGINAL_TIMELINE_DATA";
+    {
+        std::ofstream out(file);
+        out << original_data;
+    }
+
+#ifdef _WIN32
+    DWORD old_attrs = GetFileAttributesW(file.c_str());
+    ASSERT_NE(old_attrs, INVALID_FILE_ATTRIBUTES);
+    SetFileAttributesW(file.c_str(), old_attrs | FILE_ATTRIBUTE_READONLY);
+
+    auto res = CsvExporter::export_timeline_to_file(file, result, true);
+    EXPECT_FALSE(res.success);
+    EXPECT_FALSE(res.error_message.empty());
+
+    SetFileAttributesW(file.c_str(), old_attrs);
+#endif
+
+    std::ifstream in(file);
+    std::string read_back;
+    in >> read_back;
+    EXPECT_EQ(read_back, original_data);
+    in.close();
+
+    EXPECT_FALSE(std::filesystem::exists(temp_file));
+
     std::error_code ec;
     std::filesystem::remove(file, ec);
 }

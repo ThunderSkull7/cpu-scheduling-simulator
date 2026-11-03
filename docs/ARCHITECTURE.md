@@ -306,7 +306,7 @@ flowchart TD
 - **Architectural Responsibilities**:
   1. **Dual Export Formats**: Emits Process Execution Metrics (`process_id,arrival_time,burst_time,completion_time,turnaround_time,waiting_time,response_time,priority,queue_id`) and Execution Timeline (`start_time,end_time,process_id,queue_id`).
   2. **Formula Injection Defense (CSV Injection)**: Proactively neutralizes potential spreadsheet formula execution characters (`=`, `+`, `-`, `@`) in text fields via single-quote escaping at export boundaries while strictly preserving numeric fields and in-memory results.
-  3. **Safe Atomic File Operations**: Writes export data to a temporary file (`.tmp`) before atomic renaming, preventing corrupted or partially written files upon disk errors.
+  3. **Safe Staged File Replacement**: Writes export data to a temporary file (`.tmp`) before in-place replacement (via `ReplaceFileW` on Windows), preventing corrupted or partially written files and strictly preserving the original file if replacement fails.
 
 ---
 

@@ -38,7 +38,7 @@ struct CsvExportResult {
  * @brief Exports scheduling results and execution timelines to standardized CSV files.
  *
  * Provides RFC 4180 escaping, spreadsheet formula injection defense for text fields,
- * atomic and safe file writing, and stream-writing interfaces.
+ * safe file writing with transactional replacement on Windows, and stream-writing interfaces.
  */
 class CsvExporter {
 public:
@@ -74,6 +74,9 @@ public:
 
     /**
      * @brief Exports process execution metrics to a file on disk.
+     *
+     * Staged write to a temporary file with safe in-place replacement (via ReplaceFileW on Windows).
+     * The original destination file is preserved untouched if replacement fails.
      */
     [[nodiscard]] static CsvExportResult export_process_metrics_to_file(
         const std::filesystem::path& path,
@@ -98,6 +101,9 @@ public:
 
     /**
      * @brief Exports the chronological execution timeline to a file on disk.
+     *
+     * Staged write to a temporary file with safe in-place replacement (via ReplaceFileW on Windows).
+     * The original destination file is preserved untouched if replacement fails.
      */
     [[nodiscard]] static CsvExportResult export_timeline_to_file(
         const std::filesystem::path& path,
