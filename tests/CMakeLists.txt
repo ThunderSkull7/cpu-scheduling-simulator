@@ -16,6 +16,9 @@ add_executable(cpu_scheduler_tests
     test_csv_workload_importer.cpp
     test_csv_results_exporter.cpp
     test_cli_csv.cpp
+    test_scheduling_integration.cpp
+    test_pipeline_integration.cpp
+    test_cli_integration.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests
