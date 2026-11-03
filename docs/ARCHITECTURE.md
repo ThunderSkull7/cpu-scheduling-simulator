@@ -204,7 +204,7 @@ flowchart TD
 
 ## 3. Test Organization and Execution
 
-The test suite contains **601 automated GoogleTest unit and integration tests** organized into 17 modular test files:
+The test suite contains **601 automated GoogleTest unit and integration tests** organized into 20 modular test files:
 
 | Test Source File | Focus Area | Test Count |
 | :--- | :--- | :---: |
