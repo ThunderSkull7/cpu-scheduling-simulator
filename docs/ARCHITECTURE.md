@@ -1,6 +1,6 @@
 # CPU Scheduling Simulator — Architectural Design
 
-This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator**. It articulates the separation of concerns across implemented foundational models, the FCFS, SJF, SRTF, Round Robin, and Priority scheduling engines, and planned future algorithm extensions.
+This document details the architectural foundation, component boundaries, and design principles of the **CPU Scheduling Simulator** (C++20). It articulates the separation of concerns across the foundational data models, all eight scheduling engines, the unified dispatch layer, the interactive CLI, the presentation engine, the CSV import/export subsystem, and the integration testing framework.
 
 ---
 
@@ -11,39 +11,50 @@ The core architectural tenet of the simulator is the strict separation between:
 2. **Mutable Simulation State**: Dynamic execution tracking for individual processes (`ProcessState`).
 3. **Execution Timeline & Segments**: The complete chronological trace of CPU activity, including explicit idle intervals (`ExecutionSegment`).
 4. **Simulation Results & Analytics**: Deterministic post-execution metrics and aggregate statistics (`SchedulingResult`).
-5. **Presentation**: Decoupled visualization renderers (e.g. `GanttChart`).
+5. **Unified Engine**: A central dispatcher decoupling user requests from scheduling logic (`SchedulingEngine`).
+6. **Presentation**: Decoupled visualization renderers (`ResultsRenderer`, `GanttChart`).
+7. **CSV Data Interchange**: RFC 4180 parsing, transactional workload ingestion, and safe spreadsheet export (`CsvParser`, `WorkloadImporter`, `CsvExporter`).
+8. **Interactive CLI Application**: Stream-driven terminal user interface (`CliController`).
 
 ```mermaid
 flowchart TD
-    subgraph InputLayer["1. Input & Validation Layer (Batch 1)"]
-        RawWorkload["Process Workload\n(id, arrival_time, burst_time, priority)"] --> Validator["ProcessValidator"]
-        Validator --> ValidationResult{"ValidationResult\n(errors, is_valid)"}
+    subgraph InputSubsystem["1. Input & Ingestion Layer"]
+        RawWorkload["Process Workload\n(id, arrival, burst, priority)"] --> Validator["ProcessValidator\n(structural validation)"]
+        CsvFile["Workload CSV File\n(RFC 4180)"] --> CsvParser["CsvParser\n(lexer & tokenizer)"]
+        CsvParser --> WorkloadImporter["WorkloadImporter\n(schema & row validation)"]
+        WorkloadImporter --> RawWorkload
     end
 
-    subgraph UnifiedLayer["2. Unified Scheduling Engine (Batch 9)"]
-        SchedulingRequest["SchedulingRequest\n(algorithm, workload, config)"] --> SchedulingEngine["SchedulingEngine / UnifiedScheduler\n(central dispatcher & validation)"]
+    subgraph UnifiedLayer["2. Unified Dispatch Layer"]
+        Validator --> SchedulingRequest["SchedulingRequest\n(algorithm, workload, config)"]
+        Cli["CliController\n(Interactive Terminal UI)"] --> SchedulingRequest
+        SchedulingRequest --> SchedulingEngine["SchedulingEngine\n(central dispatcher & validation)"]
     end
 
-    subgraph SimulationLayer["3. Scheduling Simulation Engines (Batches 2-8 Implemented)"]
+    subgraph SchedulerSubsystem["3. Scheduling Simulation Engines"]
         SchedulingEngine -->|Dispatch| Fcfs["FcfsScheduler\n(Non-Preemptive FCFS)"]
         SchedulingEngine -->|Dispatch| Sjf["SjfScheduler\n(Non-Preemptive SJF)"]
         SchedulingEngine -->|Dispatch| Srtf["SrtfScheduler\n(Preemptive SRTF)"]
-        SchedulingEngine -->|Dispatch| Rr["RrScheduler\n(Preemptive Round Robin)"]
-        SchedulingEngine -->|Dispatch| NpPrio["NonPreemptivePriorityScheduler\n(Non-Preemptive Priority)"]
+        SchedulingEngine -->|Dispatch| Rr["RrScheduler\n(Round Robin)"]
+        SchedulingEngine -->|Dispatch| NpPrio["NonPreemptivePriorityScheduler\n(NP Priority)"]
         SchedulingEngine -->|Dispatch| PPrio["PreemptivePriorityScheduler\n(Preemptive Priority)"]
-        SchedulingEngine -->|Dispatch| Mlq["MlqScheduler\n(Multilevel Queue Scheduling)"]
+        SchedulingEngine -->|Dispatch| Mlq["MlqScheduler\n(Multilevel Queue)"]
         SchedulingEngine -->|Dispatch| Mlfq["MlfqScheduler\n(Multilevel Feedback Queue)"]
-        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, queue_id, status)"]
+
+        Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> ProcessState["ProcessState Vector\n(start, completion, TAT, WT, RT, status)"]
         Fcfs & Sjf & Srtf & Rr & NpPrio & PPrio & Mlq & Mlfq --> Timeline["ExecutionSegment Timeline\n(Process & Idle intervals)"]
     end
 
-    subgraph AnalyticsLayer["4. Results & Metrics Engine (Batch 2)"]
-        Timeline & ProcessState --> SchedulingResult["SchedulingResult\n(timeline, states, metrics, utilization)"]
+    subgraph AnalyticsSubsystem["4. Analytics & Results"]
+        ProcessState & Timeline --> SchedulingResult["SchedulingResult\n(metrics, states, timeline, utilization)"]
     end
 
-    subgraph PresentationLayer["5. Presentation Layer (Batches 2-9)"]
-        SchedulingResult --> GanttChart["GanttChart::render (ASCII)"]
-        SchedulingResult --> CliMetrics["Metrics Display & Algorithm Comparison"]
+    subgraph OutputSubsystem["5. Presentation & Export Layer"]
+        SchedulingResult --> ResultsRenderer["ResultsRenderer\n(summary, table, metrics, report)"]
+        ResultsRenderer --> GanttChart["GanttChart\n(proportional blocks, Unicode/ASCII)"]
+        SchedulingResult --> CsvExporter["CsvExporter\n(metrics & timeline CSV, injection defense)"]
+        CsvExporter --> DiskFiles["Disk Storage\n(atomic ReplaceFileW)"]
+        ResultsRenderer --> Cli
     end
 ```
 
@@ -51,7 +62,7 @@ flowchart TD
 
 ## 2. Component Boundaries & Responsibilities
 
-### 2.1 Process Input Model (`cpu_scheduler::Process`) — **Implemented (Batch 1)**
+### 2.1 Process Input Model (`cpu_scheduler::Process`)
 - **Location**: `include/cpu_scheduler/process.hpp`
 - **Role**: Pure data model representing immutable workload input parameters:
   - `id`: Unique identifier (`std::string`).
@@ -59,55 +70,51 @@ flowchart TD
   - `burst_time`: Total CPU execution time required (`Time = std::int64_t`).
   - `priority`: Static scheduling priority (`int`, smaller numerical value represents higher priority).
 - **Invariants & Design Constraints**:
-  - The model does not contain mutable simulation fields.
+  - Immutable once constructed.
   - The original burst time is preserved and never modified during simulation.
   - Zero and negative priorities are fully valid.
 
-### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`) — **Implemented (Batch 1)**
+### 2.2 Workload Validation (`cpu_scheduler::ProcessValidator`)
 - **Location**: `include/cpu_scheduler/process_validator.hpp`
 - **Role**: Validates input workloads against simulation integrity rules:
-  1. **Non-Empty Workload**: At least one process must be supplied.
+  1. **Non-Empty Workload**: At least one process must be supplied (up to 100 max).
   2. **Non-Empty Process ID**: Process IDs must not be empty or whitespace-only.
   3. **Unique Process IDs**: IDs are compared case-insensitively and ignoring surrounding whitespace.
   4. **Non-Negative Arrival Time**: `arrival_time >= 0`.
   5. **Positive Burst Time**: `burst_time > 0`.
 - **Invariants & Design Constraints**:
-  - Validations do not modify the input process vector.
-  - Returns `ValidationResult` containing all detected errors rather than aborting at the first failure.
-  - Zero exceptions for standard input validation.
+  - Accumulates and returns all detected errors in `ValidationResult` rather than aborting on the first failure.
+  - Zero exceptions thrown for standard validation errors.
 
-### 2.3 Process Execution State (`cpu_scheduler::ProcessState`) — **Implemented (Batch 2)**
+### 2.3 Process Execution State (`cpu_scheduler::ProcessState`)
 - **Location**: `include/cpu_scheduler/process_state.hpp`
-- **Role**: Dynamic execution and performance metrics state for an individual process.
+- **Role**: Dynamic execution tracking and calculated metrics for an individual process.
 - **Fields**:
   - `process_id`: Identifier corresponding to the input process.
   - `arrival_time`, `burst_time`, `priority`: Copied input parameters.
   - `remaining_time`: Remaining CPU time to execute.
   - `start_time`: Timestamp when the process first received CPU execution.
   - `completion_time`: Timestamp when the process terminated execution.
-  - `turnaround_time`: Total time spent in the system ($CT - Arrival Time$).
-  - `waiting_time`: Total time spent waiting in the ready queue ($TAT - Burst Time$).
-  - `response_time`: Duration from arrival until initial execution ($Start Time - Arrival Time$).
+  - `turnaround_time`: Elapsed time from arrival to completion ($CT - AT$).
+  - `waiting_time`: Total time spent waiting in ready queues ($TAT - BT$).
+  - `response_time`: Duration from arrival until initial execution ($Start Time - AT$).
+  - `queue_id`: Assigned or final queue identifier.
   - `status`: Lifecycle enumeration (`NotStarted`, `Running`, `Completed`).
-- **Isolation**: Keeps execution variables completely separate from the original input `Process`.
 
-### 2.4 Execution Timeline (`cpu_scheduler::ExecutionSegment`) — **Implemented (Batch 2)**
+### 2.4 Execution Timeline (`cpu_scheduler::ExecutionSegment`)
 - **Location**: `include/cpu_scheduler/execution_segment.hpp`
 - **Role**: Represents an atomic contiguous block of CPU time.
 - **Fields**:
   - `type`: `SegmentType::Process` or `SegmentType::Idle`.
   - `process_id`: ID of the running process, or `std::nullopt` during CPU idle.
-  - `start_time`: Simulation start timestamp.
-  - `end_time`: Simulation completion timestamp.
+  - `start_time`, `end_time`: Simulation boundary timestamps.
   - `duration()`: Convenience helper ($end\_time - start\_time$).
-  - `is_idle()`: Predicate checking whether the segment represents CPU idle.
-  - `is_process()`: Predicate checking whether the segment represents process execution.
-- **Rules**:
-  - CPU idle intervals are recorded explicitly (`SegmentType::Idle`).
-  - Zero-length intervals are prohibited.
-  - Multiple execution segments for a single process are naturally supported when preemption occurs.
+  - `is_idle()`, `is_process()`: Type inspection predicates.
+- **Invariants**:
+  - Continuous timeline with zero unrecorded gaps: $S_{k+1}.\text{start\_time} == S_k.\text{end\_time}$.
+  - Zero-length intervals are prohibited ($start\_time < end\_time$).
 
-### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`) — **Implemented (Batch 2)**
+### 2.5 Scheduling Result (`cpu_scheduler::SchedulingResult` & `ScheduleOutcome`)
 - **Location**: `include/cpu_scheduler/scheduling_result.hpp`
 - **Role**: Aggregates the execution timeline, per-process states, and summary metrics. Shared across all scheduling algorithms.
 - **Metrics Computed**:
@@ -115,203 +122,129 @@ flowchart TD
   - `cpu_busy_time`: Sum of burst times across all scheduled processes.
   - `cpu_idle_time`: Sum of all idle interval durations.
   - `cpu_utilization`: $(cpu\_busy\_time / total\_execution\_time) \times 100\%$.
-  - `average_waiting_time`: $\sum WT / N$.
-  - `average_turnaround_time`: $\sum TAT / N$.
-  - `average_response_time`: $\sum RT / N$.
-- **Error Distinction**:
-  - `ScheduleOutcome` holds either a successful `SchedulingResult` or a `ScheduleError`.
-  - Differentiates between input validation failures (`ScheduleErrorKind::ValidationError`) and arithmetic overflows (`ScheduleErrorKind::ArithmeticOverflow`).
+  - `average_waiting_time`, `average_turnaround_time`, `average_response_time`.
 
-### 2.6 FCFS Scheduler (`cpu_scheduler::FcfsScheduler`) — **Implemented (Batch 2)**
+### 2.6 FCFS Scheduler (`cpu_scheduler::FcfsScheduler`)
 - **Location**: `include/cpu_scheduler/fcfs_scheduler.hpp`
-- **Role**: Implements non-preemptive First Come, First Served scheduling.
-- **Responsibilities**:
-  1. Validates the workload using `ProcessValidator`.
-  2. Arranges processes by ascending `arrival_time` using stable sort (preserving input order for simultaneous arrivals).
-  3. Dispatches processes sequentially to completion.
-  4. Inserts explicit CPU idle segments when no process is ready.
-  5. Computes per-process metrics and system-wide statistics.
-  6. Detects and prevents signed 64-bit integer overflow during time accumulation.
-  7. Returns a structured `ScheduleOutcome`.
+- **Role**: Non-preemptive First Come, First Served scheduling.
+- **Key Traits**: Stable sorting by arrival time; sequential non-preemptive dispatch; explicit CPU idle insertion; checked 64-bit integer addition.
 
-### 2.7 SJF Scheduler (`cpu_scheduler::SjfScheduler`) — **Implemented (Batch 3)**
+### 2.7 SJF Scheduler (`cpu_scheduler::SjfScheduler`)
 - **Location**: `include/cpu_scheduler/sjf_scheduler.hpp`
-- **Role**: Implements non-preemptive Shortest Job First scheduling.
-- **Dynamic Ready-Queue Selection**:
-  - Only processes with $arrival\_time \le current\_time$ are admitted into the ready queue.
-  - Selection priority:
-    1. Shortest `burst_time`.
-    2. Earlier `arrival_time` (tie-breaker).
-    3. Original input index (stable tie-breaker).
-  - Unarrived processes cannot be selected regardless of burst time.
-  - Implemented using an initial $O(n \log n)$ sort by arrival time and a min-priority queue for ready processes. Overall complexity is $O(n \log n)$ time and $O(n)$ space.
+- **Role**: Non-preemptive Shortest Job First scheduling.
+- **Dynamic Ready Queue Selection**: Filters arrived candidates dynamically ($AT \le t$). Three-tier tie-breaking: 1. Smallest burst, 2. Earlier arrival, 3. Input sequence index. $O(n \log n)$ time complexity.
 
-### 2.8 SRTF Scheduler (`cpu_scheduler::SrtfScheduler`) — **Implemented (Batch 4)**
+### 2.8 SRTF Scheduler (`cpu_scheduler::SrtfScheduler`)
 - **Location**: `include/cpu_scheduler/srtf_scheduler.hpp`
-- **Role**: Implements preemptive Shortest Remaining Time First (SRTF) scheduling.
-- **Preemption Rule**:
-  - A running process is preempted **if and only if** another ready process has a **strictly smaller** remaining execution time (`competing.remaining_time < running.remaining_time`).
-  - Equal remaining times do not cause preemption, preventing unnecessary context switching.
-- **Three-Tier Deterministic Tie-Breaking**:
-  1. Smallest `remaining_time`.
-  2. Earlier `arrival_time`.
-  3. Original input sequence index.
-- **Event-Driven Engine**:
-  - Jumps directly between discrete scheduling events (process arrivals and slice completions).
-  - Time complexity: $O(n \log n)$ where $n$ is the number of processes.
-  - Space complexity: $O(n)$.
+- **Role**: Preemptive Shortest Remaining Time First scheduling.
+- **Event-Driven Preemption**: Jumps between discrete arrival and completion events. Preempts **if and only if** competing job has strictly smaller remaining burst (`competing.remaining < running.remaining`).
 
-### 2.9 Round Robin Scheduler (`cpu_scheduler::RrScheduler`) — **Implemented (Batch 5)**
+### 2.9 Round Robin Scheduler (`cpu_scheduler::RrScheduler`)
 - **Location**: `include/cpu_scheduler/rr_scheduler.hpp`
-- **Role**: Implements preemptive Round Robin (RR) scheduling with a configurable time quantum.
-- **Queue Semantics & Quantum Expiration**:
-  - Maintains a strict FIFO ready queue.
-  - Each process executes for at most the positive time quantum: $\text{slice} = \min(q, \text{remaining\_burst})$.
-  - When a quantum expires, any processes arriving at that timestamp are admitted into the ready queue **before** the preempted process is requeued.
-  - If a process finishes its execution, it is permanently marked completed and never requeued.
-- **Timeline Normalization**:
-  - If a process finishes its quantum and no competing process is ready, it retains the CPU.
-  - Consecutive execution slices for the same process are normalized into a continuous execution segment, avoiding artificial timeline fragments.
-- **Complexity**: $O(n \log n + \frac{\text{Total Burst}}{q})$ time and $O(n + \frac{\text{Total Burst}}{q})$ timeline segment space.
+- **Role**: Preemptive Round Robin scheduling with configurable time quantum ($q$).
+- **Queue Semantics**: Strict FIFO queue. New arrivals at quantum expiration timestamp are admitted **before** the preempted process is requeued. Consecutive slices of the same process are merged (timeline normalization).
 
-### 2.10 Priority Schedulers (`cpu_scheduler::NonPreemptivePriorityScheduler` & `PreemptivePriorityScheduler`) — **Implemented (Batch 6)**
-- **Location**: `include/cpu_scheduler/priority_scheduler.hpp`, `src/priority_scheduler.cpp`
-- **Role**: Implements both non-preemptive and preemptive priority-based scheduling.
-- **Priority Direction**:
-  - Smaller numerical priority value indicates strictly higher scheduling priority ($1 > 2$, $-5 > 0$).
-  - Relational comparisons (`>`) are used directly without subtractions, avoiding signed integer overflow.
-- **Deterministic Tie-Breaking Rules**:
-  1. Highest priority (smallest numerical value).
-  2. Earlier arrival time.
-  3. Original input index.
-- **Non-Preemptive Priority Scheduler**:
-  - Admitted ready processes are ordered by priority. The highest-priority ready process executes to completion uninterrupted.
-  - Complexity: $O(n \log n)$ time, $O(n)$ space.
-- **Preemptive Priority Scheduler**:
-  - Event-driven discrete simulation jumping between arrivals and completions.
-  - Preemption Rule: The active process is preempted **if and only if** a newly arrived process has a **strictly higher priority** (`new_proc.priority < running_proc.priority`).
-  - Equal-priority arrivals do not preempt the running process.
-  - Lower-priority arrivals do not preempt the running process.
-  - Preempted processes return to the ready pool with their remaining burst time preserved.
-  - Number of preemptions is bounded by $n$, yielding an exact time complexity of $O(n \log n)$ and auxiliary space of $O(n)$ (at most $2n - 1$ timeline segments).
-- **Starvation Limitation & Aging Considerations**:
-  - Fixed-priority scheduling inherently suffers from starvation of lower-priority processes when higher-priority processes arrive continuously.
-  - Priority aging (gradually incrementing priority of waiting processes) is intentionally out of scope for Batch 6 and will be implemented in future batches.
+### 2.10 Priority Schedulers (`NonPreemptivePriorityScheduler` & `PreemptivePriorityScheduler`)
+- **Location**: `include/cpu_scheduler/priority_scheduler.hpp`
+- **Role**: Non-preemptive and preemptive static priority scheduling.
+- **Priority Rules**: Smaller numerical value = higher priority. Preemptive variant preempts only when newly arrived process has strictly higher priority (`new.priority < running.priority`).
 
-### 2.11 Multilevel Queue Scheduler (`cpu_scheduler::MlqScheduler`) — **Implemented (Batch 7)**
-- **Location**: `include/cpu_scheduler/mlq_scheduler.hpp`, `src/mlq_scheduler.cpp`
-- **Role**: Implements Multilevel Queue (MLQ) scheduling with multiple distinct ready queues.
-- **Architectural Tenets**:
-  1. **Permanent Process-to-Queue Assignment**: Each process is bound to exactly one queue (`MlqProcessBinding`) throughout the simulation. No inter-queue migration or aging occurs (strictly separated from MLFQ).
-  2. **Decoupled Queue vs. Process Priority**: Queue priority governs inter-queue CPU allocation (smaller numerical value = higher queue priority). Process priority governs intra-queue selection for priority-based queue algorithms.
-  3. **Configurable Inter-Queue Policies**:
-     - `InterQueuePolicy::FixedPriorityPreemptive`: The ready queue with the highest priority executes; arrivals in higher-priority queues trigger immediate preemption.
-     - `InterQueuePolicy::RoundRobin`: Cycles through non-empty queues with an inter-queue time quantum ($Q_{\text{inter}}$).
-  4. **Supported Intra-Queue Algorithms**: FCFS, Non-preemptive SJF, Preemptive SRTF, Round Robin (with internal quantum $q_{\text{internal}}$), Non-preemptive Priority, Preemptive Priority.
-  5. **Two-Level Quantum Interaction**: In nested Round Robin configurations, the internal slice and inter-queue slice decrease concurrently. State preservation allows an interrupted process to resume its remaining internal slice upon queue re-entry.
-  6. **Timeline Normalization**: Merges consecutive slices of the same process into unbroken execution segments.
-- **Complexity**: $O(N \log N + K \cdot E)$ for Fixed Priority; $O(N \log N + \frac{B}{Q} \cdot K)$ for Round Robin between queues.
+### 2.11 Multilevel Queue Scheduler (`cpu_scheduler::MlqScheduler`)
+- **Location**: `include/cpu_scheduler/mlq_scheduler.hpp`
+- **Role**: Multi-queue partitioning with permanent process-to-queue bindings.
+- **Key Traits**: Independent intra-queue algorithms (FCFS, SJF, SRTF, RR, NP Priority, Preemptive Priority); configurable inter-queue policies (`FixedPriorityPreemptive` and `RoundRobin`).
 
-### 2.12 Multilevel Feedback Queue Scheduler (`cpu_scheduler::MlfqScheduler`) — **Implemented (Batch 8)**
-- **Location**: `include/cpu_scheduler/mlfq_scheduler.hpp`, `src/mlfq_scheduler.cpp`
-- **Role**: Implements Multilevel Feedback Queue (MLFQ) scheduling with dynamic process movement across priority queues.
-- **Architectural Tenets & Mechanisms**:
-  1. **Dynamic Queue Movement vs. Permanent Binding**: Unlike MLQ where processes are statically assigned to queues, MLFQ automatically migrates processes based on CPU consumption.
-  2. **Initial Placement**: Every newly arriving process unconditionally enters Queue 0 (the highest-priority queue).
-  3. **Strict Priority Hierarchy**: Queue 0 is the highest priority; Queue $L-1$ is the lowest. A process at level $k$ is only scheduled if queues $0 \dots k-1$ are empty.
-  4. **Dynamic Demotion via Level Allotment**:
-     - Each queue level $l$ defines a `time_quantum` and an optional `cpu_allotment` (defaulting to the quantum).
-     - When a process accumulates CPU execution at level $l$ equal to that level's allotment, it is demoted to level $l+1$ and appended to the back of the queue.
-     - Bottom-level processes stay at the bottom level upon allotment expiration, rotating to the back of the queue.
-  5. **Allotment Tracking & Preemption Preservation**:
-     - When a process running at level $l > 0$ is preempted by a higher-priority arrival into Queue 0, its consumed allotment and remaining quantum at level $l$ are **not** reset.
-     - The preempted process stays at the head of level $l$ (`push_front`) so it can resume immediately when higher queues empty.
-  6. **Periodic Priority Boosting**:
-     - Prevents starvation of CPU-bound processes. Every `boost_interval` time units ($t = k \times \text{boost\_interval}$), all uncompleted processes are promoted to Queue 0.
-     - Upon boost, all queue levels are cleared, remaining allotments and quantums are reset to level 0 defaults, and processes are queued in Queue 0 sorted deterministically by earlier arrival time, broken by earlier input workload index.
-     - Boost interrupts an executing process at the exact boost timestamp, closing the active timeline segment.
-  7. **Deterministic Tie-Breaking & Event Ordering**:
-     - Deterministic multi-tier ordering: 1. Queue level ($0 < 1 < \dots < L-1$), 2. Queue FIFO position, 3. Earlier arrival time, 4. Workload input sequence index.
-     - Event processing priority at timestamp $t$: 1. Boost event, 2. Process arrivals, 3. Quantum/allotment expiration.
-  8. **Timeline Normalization & Overflow Safety**:
-     - Consecutive slices of the same process are merged into single continuous timeline segments.
-     - All timestamp increments and allotment summations use checked arithmetic (`safe_add`).
-- **Complexity**: $O(N \log N + \frac{\text{Total Burst}}{\min(q)} + K_{\text{boost}} \cdot N \log N)$ time and $O(N + \frac{\text{Total Burst}}{\min(q)})$ space.
+### 2.12 Multilevel Feedback Queue Scheduler (`cpu_scheduler::MlfqScheduler`)
+- **Location**: `include/cpu_scheduler/mlfq_scheduler.hpp`
+- **Role**: Dynamic priority scheduling with feedback demotion.
+- **Key Traits**: Initial admission to Queue 0; dynamic demotion across priority levels upon exhausting level CPU allotment; allotment preserved upon preemption by higher arrivals; periodic starvation boost promoting all uncompleted jobs to Queue 0.
 
-### 2.13 Unified Scheduling Engine (`cpu_scheduler::SchedulingEngine` / `UnifiedScheduler`) — **Implemented (Batch 9)**
-- **Location**: `include/cpu_scheduler/scheduling_engine.hpp`, `src/scheduling_engine.cpp`
-- **Role**: Common facade and central dispatcher decoupling callers from underlying scheduler specifics.
-- **Architectural Responsibilities**:
-  1. **Algorithm Selection**: `enum class SchedulingAlgorithm` strictly differentiates all 8 algorithm implementations.
-  2. **Type-Safe Request Container**: `SchedulingRequest` encapsulates algorithm selection, input workload, and algorithm-specific configuration in `std::variant<std::monostate, RoundRobinConfig, MlqWorkload, MlfqConfig>`.
-  3. **Configuration Routing & Validation**:
-     - Enforces that non-configurable algorithms receive `std::monostate` and rejects irrelevant configuration.
-     - Validates that Round Robin receives positive quantum via `RoundRobinConfig`.
-     - Validates that MLQ receives `MlqWorkload` and MLFQ receives `MlfqConfig`.
-  4. **Zero Duplication & Full Compatibility**: Directly executes existing schedulers and preserves structured outcomes (`ScheduleOutcome`, `SchedulingResult`, `ScheduleError`).
-  5. **Introspection Helpers**: Provides reflection and string conversion utilities (`to_string`, `algorithm_name`, `algorithm_from_string`, `supported_algorithms`).
+### 2.13 Unified Scheduling Engine (`cpu_scheduler::SchedulingEngine`)
+- **Location**: `include/cpu_scheduler/scheduling_engine.hpp`
+- **Role**: Type-safe central execution dispatcher.
+- **Key Traits**: Single `SchedulingRequest` entry point; `std::variant` configuration container; validation of algorithm-specific configs; introspection helpers (`to_string`, `supported_algorithms`).
 
-### 2.14 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Enhanced (Batch 11)**
-- **Location**: `include/cpu_scheduler/gantt_chart.hpp`, `src/gantt_chart.cpp`
-- **Role**: Generates text-based Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
-- **Architectural Responsibilities**:
-  1. **Duration-Aware Proportional Widths**: Scales block widths based on execution slice duration relative to minimum duration, clamped between `min_block_width` and `max_block_width`.
-  2. **Timestamp Axis Alignment**: Accurately places timestamps directly beneath block boundary markers (`+` or `|`), preventing numeric displacement across long or varied durations.
-  3. **Multi-Row Wrapping**: Automatically wraps long schedules onto consecutive rows when accumulated line width reaches `max_row_width` (default 80 columns), preserving continuous timeline readability.
-  4. **Idle Interval Visualization**: Explicitly displays CPU idle gaps with proportional widths and clear start/finish boundary timestamps.
-  5. **Preemption Support**: Seamlessly renders repeated execution slices belonging to the same process.
-  6. **Queue Metadata Support**: Includes queue metadata (e.g. `P1 [Q0]`) when available and enabled.
-  7. **Border Styling**: Configurable ASCII (`+`, `-`, `|`) and Unicode box-drawing character modes.
-  8. **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms.
+### 2.14 Gantt Chart Renderer (`cpu_scheduler::GanttChart`)
+- **Location**: `include/cpu_scheduler/gantt_chart.hpp`
+- **Role**: Duration-aware text Gantt chart generator.
+- **Key Traits**: Proportional block scaling; timestamp boundary alignment under borders; multi-row wrapping; idle block visualization; ASCII and Unicode box-drawing support; queue metadata display.
+- **Known Limitation on MLFQ Queue Labels**: `ProcessState::queue_id` stores each process's *final* queue level upon completion. Because individual execution slices in `ExecutionSegment` do not store historical level transitions, MLFQ Gantt charts display process IDs without misleading intermediate queue annotations.
 
-### 2.15 Interactive CLI Controller (`cpu_scheduler::CliController`) — **Implemented (Batch 10)**
+### 2.15 Interactive CLI Controller (`cpu_scheduler::CliController`)
 - **Location**: `include/cpu_scheduler/cli.hpp`, `src/cli.cpp`, `src/cli_main.cpp`
-- **Role**: Presentation and application layer providing an interactive terminal interface for the simulator.
-- **Architectural Responsibilities**:
-  1. **Decoupled Stream-Based I/O**: Interacts strictly through `std::istream&` and `std::ostream&`, enabling complete headless automated testing via standard string streams.
-  2. **Unified Scheduling Engine Integration**: Binds user selections exclusively to `SchedulingRequest` and dispatches via `SchedulingEngine::execute`, with zero scheduling algorithm reimplementation.
-  3. **Field-Level Validation & Retry**: Implements field-by-field validation loops for process IDs (uniqueness, whitespace), non-negative arrival times, positive burst times, priorities, queue assignments, and algorithm configurations.
-  4. **Graceful Stream & Error Handling**: Seamlessly detects EOF without entering infinite loops, avoids stream corruption, prevents numeric overflows via checked parsers, and presents structured validation error diagnostics.
-  5. **Rich Text Formatting & Gantt Visualization**: Formats simulation banners, main menus, simulation summaries, aligned tabular process execution states, aggregate metrics, chronological execution timelines, and automatic Gantt chart display.
+- **Role**: Terminal user interface with decoupled stream-based I/O (`std::istream&`, `std::ostream&`).
+- **Key Traits**: Interactive menus; field-level validation and recovery loops; safe stream EOF termination; formatted presentation of summaries, tables, Gantt charts, and timelines.
 
-### 2.16 Dedicated Results Presentation Engine (`cpu_scheduler::ResultsRenderer`) — **Implemented (Batch 11)**
-- **Location**: `include/cpu_scheduler/results_renderer.hpp`, `src/results_renderer.cpp`
-- **Role**: Standalone formatting engine responsible for turning `SchedulingResult` into structured presentation reports.
-- **Architectural Responsibilities**:
-  1. **Modular Components**: Exposes dedicated rendering methods for Simulation Summary (`render_summary`), Process Table (`render_process_table`), Aggregate Metrics (`render_aggregate_metrics`), Execution Timeline (`render_timeline`), and Gantt Chart (`render_gantt_chart`).
-  2. **Full Report Composition**: `render_full_report` composes all components into a complete, presentation-ready report with configurable inclusion options via `RenderOptions`.
-  3. **Dual String & Stream Interfaces**: Every rendering method is provided as both an `std::string` returning function and a stream-writing overload (`std::ostream&`), preventing unnecessary string allocations for large simulations.
-  4. **Strict Decoupling**: Free of scheduler internals, execution engines, or terminal UI control logic.
+### 2.16 Dedicated Results Presentation Engine (`cpu_scheduler::ResultsRenderer`)
+- **Location**: `include/cpu_scheduler/results_renderer.hpp`
+- **Role**: Standalone formatting engine composing structured simulation reports.
+- **Key Traits**: Modular rendering methods (`render_summary`, `render_process_table`, `render_aggregate_metrics`, `render_timeline`, `render_gantt_chart`, `render_full_report`) with both `std::string` and `std::ostream&` stream interfaces.
 
-### 2.17 CSV Parsing Engine (`cpu_scheduler::CsvParser`) — **Implemented (Batch 12)**
-- **Location**: `include/cpu_scheduler/csv_parser.hpp`, `src/csv_parser.cpp`
-- **Role**: Reusable RFC 4180 compliant CSV document parser.
-- **Architectural Responsibilities**:
-  1. **Standard RFC 4180 Parsing**: Handles quoted fields, embedded commas, escaped quotes (`""`), multi-line fields, CRLF and LF line endings, empty fields, and missing trailing newlines.
-  2. **Syntax Diagnostic Engine**: Flags unclosed quotes, premature characters after closing quotes, and malformed quoting with precise 1-based line and column coordinates.
-  3. **Universal Input Ingestion**: Supports parsing from string views, input streams (`std::istream&`), and disk file paths.
+### 2.17 CSV Parsing Engine (`cpu_scheduler::CsvParser`)
+- **Location**: `include/cpu_scheduler/csv_parser.hpp`
+- **Role**: RFC 4180 compliant CSV parser.
+- **Key Traits**: Handles quoted fields, escaped quotes (`""`), embedded commas, multi-line fields, CRLF/LF line endings; 1-based syntax diagnostic engine.
 
-### 2.18 Workload Ingestion Engine (`cpu_scheduler::WorkloadImporter`) — **Implemented (Batch 12)**
-- **Location**: `include/cpu_scheduler/workload_importer.hpp`, `src/workload_importer.cpp`
-- **Role**: Validates and converts parsed CSV rows into typed `Process` workloads.
-- **Architectural Responsibilities**:
-  1. **Schema Validation**: Requires `process_id`, `arrival_time`, and `burst_time` columns; identifies optional `priority` and `queue_id` columns; rejects unrecognized headers and duplicate columns.
-  2. **Row-Level Integrity & Diagnostics**: Implements comprehensive checks for empty IDs, duplicate IDs (case-insensitive and trimmed), negative arrival times, non-positive burst times, non-integer values, and field count mismatches with exact row-numbered diagnostic messages.
-  3. **All-or-Nothing Safety**: Enforces complete transactionality—if any row fails validation, no partial workload is returned.
-  4. **Record Count Bounding**: Protects simulator state by enforcing a configurable maximum record count limit (default 100).
+### 2.18 Workload Ingestion Engine (`cpu_scheduler::WorkloadImporter`)
+- **Location**: `include/cpu_scheduler/workload_importer.hpp`
+- **Role**: Ingests CSV files into typed `Process` workloads.
+- **Key Traits**: Header alias mapping (`pid`, `at`, `bt`, `prio`, `queue`); all-or-nothing transactional validation; 100-record workload limit.
 
-### 2.19 Results Export Engine (`cpu_scheduler::CsvExporter`) — **Implemented (Batch 12)**
-- **Location**: `include/cpu_scheduler/csv_exporter.hpp`, `src/csv_exporter.cpp`
-- **Role**: Serializes simulation outcomes into spreadsheet-compatible CSV documents.
-- **Architectural Responsibilities**:
-  1. **Dual Export Formats**: Emits Process Execution Metrics (`process_id,arrival_time,burst_time,completion_time,turnaround_time,waiting_time,response_time,priority,queue_id`) and Execution Timeline (`start_time,end_time,process_id,queue_id`).
-  2. **Formula Injection Defense (CSV Injection)**: Proactively neutralizes potential spreadsheet formula execution characters (`=`, `+`, `-`, `@`) in text fields via single-quote escaping at export boundaries while strictly preserving numeric fields and in-memory results.
-  3. **Safe Staged File Replacement**: Writes export data to a temporary file (`.tmp`) before in-place replacement (via `ReplaceFileW` on Windows), preventing corrupted or partially written files and strictly preserving the original file if replacement fails.
+### 2.19 Results Export Engine (`cpu_scheduler::CsvExporter`)
+- **Location**: `include/cpu_scheduler/csv_exporter.hpp`
+- **Role**: Exports process execution metrics and chronological timelines to spreadsheet CSVs.
+- **Key Traits**: Formula injection mitigation (neutralizes `=`, `+`, `-`, `@` with leading `'`); Windows-safe atomic staged file replacement via `ReplaceFileW`.
+
+### 2.20 Integration & Invariant Testing Framework
+- **Location**: `tests/test_scheduling_integration.cpp`, `tests/test_pipeline_integration.cpp`, `tests/test_cli_integration.cpp`
+- **Role**: Cross-algorithm integration testing and regression protection.
+- **Key Traits**: Universal invariant verification framework testing process conservation, mathematical metric identities, timeline contiguity, and idle intervals across all 8 algorithms; full end-to-end pipeline testing; scripted CLI integration covering Workflows A through I.
 
 ---
 
-## 3. Future Scheduling Simulator Extensions (Batches 13+)
+## 3. Test Organization and Execution
 
-The established architecture cleanly facilitates future extensions:
-- **Statistical Analytics & Benchmarking**: Algorithm comparison matrices and batch statistical benchmarking.
-- **Graphical & GUI Interfaces**: Desktop or web visual frontend consuming exported simulation data.
+The test suite contains **601 automated GoogleTest unit and integration tests** organized into 17 modular test files:
+
+| Test Source File | Focus Area | Test Count |
+| :--- | :--- | :---: |
+| `test_process.cpp` | Process data model invariants | 7 |
+| `test_process_validator.cpp` | Input validation rules | 16 |
+| `test_fcfs_scheduler.cpp` | FCFS scheduler engine | 34 |
+| `test_sjf_scheduler.cpp` | Non-preemptive SJF scheduler engine | 52 |
+| `test_srtf_scheduler.cpp` | Preemptive SRTF scheduler engine | 63 |
+| `test_rr_scheduler.cpp` | Round Robin scheduler engine | 54 |
+| `test_priority_scheduler.cpp` | Priority schedulers (NP & Preemptive) | 68 |
+| `test_mlq_scheduler.cpp` | Multilevel Queue scheduler engine | 77 |
+| `test_mlfq_scheduler.cpp` | Multilevel Feedback Queue scheduler engine | 77 |
+| `test_scheduling_engine.cpp` | Unified Scheduling Engine dispatcher | 39 |
+| `test_cli.cpp` | Interactive CLI Controller workflows | 24 |
+| `test_gantt_chart.cpp` | Duration-aware Gantt chart rendering | 13 |
+| `test_results_renderer.cpp` | Results Presentation Engine formatting | 8 |
+| `test_csv_parser.cpp` | RFC 4180 CSV Parser | 11 |
+| `test_csv_workload_importer.cpp` | CSV Workload Importer | 17 |
+| `test_csv_results_exporter.cpp` | CSV Results Exporter & Formula Injection | 8 |
+| `test_cli_csv.cpp` | CLI CSV integration workflows | 3 |
+| `test_scheduling_integration.cpp` | Universal scheduling invariants & edge cases | 8 |
+| `test_pipeline_integration.cpp` | Full end-to-end data pipeline integration | 7 |
+| `test_cli_integration.cpp` | Comprehensive scripted CLI workflows (A–I) | 9 |
+| **Total Test Count** | **Full Automated Regression Suite** | **601** |
+
+### Executing the Test Suite
+Tests are executed via standard CMake Presets:
+
+```powershell
+# Run in Debug mode:
+ctest --preset debug-test
+
+# Run in Release mode:
+ctest --preset release-test
+```
+
+---
+
+## 4. Future System Extensions
+
+With the completion of Batch 14 documentation, the core architecture is production-ready. Potential future extensions include:
+- **Graphical / Web UI**: A web-based visualizer consuming exported CSV timeline and metrics data.
+- **Statistical Benchmark Suite**: Automated comparative performance benchmarking across all 8 algorithms on synthetic workloads.
