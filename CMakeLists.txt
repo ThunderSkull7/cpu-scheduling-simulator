@@ -32,6 +32,7 @@ add_library(cpu_scheduler_lib
     src/mlfq_scheduler.cpp
     src/scheduling_engine.cpp
     src/gantt_chart.cpp
+    src/cli.cpp
 )
 
 target_include_directories(cpu_scheduler_lib
@@ -44,6 +45,22 @@ if(MSVC)
     target_compile_options(cpu_scheduler_lib PRIVATE /W4 /permissive-)
 else()
     target_compile_options(cpu_scheduler_lib PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# CLI application executable
+add_executable(cpu_scheduler_cli
+    src/cli_main.cpp
+)
+
+target_link_libraries(cpu_scheduler_cli
+    PRIVATE
+        cpu_scheduler_lib
+)
+
+if(MSVC)
+    target_compile_options(cpu_scheduler_cli PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cpu_scheduler_cli PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # Examples

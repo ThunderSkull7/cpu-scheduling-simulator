@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 9 — Unified Scheduling Engine
+## Current Status: Batch 10 — Interactive Command-Line Interface (CLI)
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -19,10 +19,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Multilevel Queue (MLQ) Scheduling Engine**: Comprehensive multilevel queue scheduler (`MlqScheduler`) featuring multiple independent ready queues, permanent process-to-queue binding, configurable queue algorithms (FCFS, SJF, SRTF, RR, Non-Preemptive Priority, Preemptive Priority), and configurable inter-queue policies (Fixed-Priority Preemptive and Round Robin between queues).
 - [x] **Multilevel Feedback Queue (MLFQ) Scheduling Engine**: Dynamic priority feedback scheduler (`MlfqScheduler`) featuring multiple priority levels, initial Q0 admission, dynamic demotion via per-level CPU allotments, preemption by higher-priority arrivals without allotment reset, configurable periodic priority boosting to prevent starvation, and timeline normalization.
 - [x] **Unified Scheduling Engine & Central Dispatcher**: Type-safe central execution dispatcher (`SchedulingEngine` / `UnifiedScheduler`) supporting uniform execution of all 8 algorithms through a consistent `SchedulingRequest` interface, configuration validation, introspection, and result compatibility.
+- [x] **Interactive CLI Application**: Decoupled, stream-based interactive command-line interface (`CliController`) supporting interactive menu navigation, field-level workload input and validation, algorithm configurations (RR, MLQ, MLFQ), simulation dispatch through `SchedulingEngine`, aligned tabular results, metrics reporting, and multi-simulation sessions.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
 - [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **487 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, and 39 comprehensive integration tests for the unified scheduling engine.
-- [ ] **Interactive CLI & Workload Parsing** *(Planned - Batch 10)*
+- [x] **Unit Testing Suite**: **511 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, and interactive CLI controller workflows.
+- [ ] **Advanced Gantt Chart Visualization** *(Planned - Batch 11)*
 
 ---
 
@@ -295,10 +296,10 @@ cmake --build --preset release
 ### 4. Run Unit Tests
 
 ```powershell
-# Debug test suite (487 tests)
+# Debug test suite (511 tests)
 ctest --preset debug-test
 
-# Release test suite (487 tests)
+# Release test suite (511 tests)
 ctest --preset release-test
 ```
 
@@ -310,6 +311,129 @@ ctest --preset release-test
 
 # Release
 .\build\release\examples\Release\basic_usage.exe
+```
+
+### 6. Launch Interactive CLI Application
+
+```powershell
+# Debug CLI
+.\build\debug\Debug\cpu_scheduler_cli.exe
+
+# Release CLI
+.\build\release\Release\cpu_scheduler_cli.exe
+```
+
+---
+
+## Interactive CLI User Guide
+
+The interactive CLI provides a user-friendly, terminal-based simulation environment built directly on top of `cpu_scheduler::SchedulingEngine`.
+
+### Main Menu
+
+Upon launch, the CLI presents the algorithm selection menu:
+
+```text
+============================================================
+              CPU SCHEDULING SIMULATOR - CLI
+============================================================
+
+Available Scheduling Algorithms:
+  1. First Come, First Served (FCFS)
+  2. Shortest Job First (SJF, Non-Preemptive)
+  3. Shortest Remaining Time First (SRTF, Preemptive)
+  4. Round Robin (RR)
+  5. Priority (Non-Preemptive)
+  6. Priority (Preemptive)
+  7. Multilevel Queue (MLQ)
+  8. Multilevel Feedback Queue (MLFQ)
+  9. Exit
+============================================================
+Enter selection (1-9):
+```
+
+### Workload & Configuration Guidelines
+
+1. **Standard Workloads (FCFS, SJF, SRTF, RR, Priority, MLFQ)**:
+   - **Process Count**: 1 to 100 processes per simulation.
+   - **Process ID**: Non-empty, unique across the workload (e.g. `P1`, `P2`). Duplicate IDs (case-insensitive) are rejected and re-prompted.
+   - **Arrival Time**: Integer $\ge 0$.
+   - **Burst Time**: Strictly positive integer $> 0$.
+   - **Priority**: Integer (smaller numerical value = higher priority). Only prompted when selecting Priority (Non-Preemptive or Preemptive) or MLQ.
+
+2. **Round Robin (RR)**:
+   - Prompts for **Time Quantum** ($> 0$).
+
+3. **Multilevel Queue (MLQ)**:
+   - **Queue Setup**: Define 1 to 10 queues. For each queue, enter its unique ID (e.g. `Q1`), priority integer, and intra-queue algorithm (FCFS, SJF, SRTF, RR, Priority NP, Priority P). If RR is chosen, an internal quantum is prompted.
+   - **Inter-Queue Policy**: Select between `Fixed Priority Preemptive` (higher priority queue strictly preempts lower) and `Round Robin` (cyclic queue execution with default inter-queue quantum).
+   - **Process Assignment**: For each process, enter process ID, arrival, burst, priority, and assign to one of the defined queues.
+
+4. **Multilevel Feedback Queue (MLFQ)**:
+   - **Level Setup**: 2 to 10 priority levels (Level 0 is highest priority).
+   - **Per-Level Quantum & Allotment**: Enter time quantum ($> 0$) and optionally a custom CPU allotment ($\ge$ quantum).
+   - **Priority Boost**: Optionally enable periodic priority boosting by specifying a positive boost interval ($> 0$).
+   - **Workload**: Processes enter Queue 0 dynamically based on feedback rules.
+
+### Results Presentation
+
+After execution, the CLI formats:
+- **Simulation Summary**: Algorithm name, process count, total simulation time, CPU busy/idle times, and CPU utilization percentage.
+- **Process Details Table**: Process ID, arrival, burst, priority (when applicable), queue ID (when applicable), completion time, turnaround time, waiting time, and response time.
+- **Aggregate Metrics**: System-wide averages for turnaround, waiting, and response times, plus CPU utilization.
+- **Execution Timeline**: Chronological trace of scheduled process execution slices and CPU idle intervals.
+
+### Example Workflow: Round Robin Execution
+
+```powershell
+.\build\release\Release\cpu_scheduler_cli.exe
+```
+
+Input sequence:
+```text
+4          # Select Round Robin (RR)
+2          # Time quantum = 2
+2          # 2 processes
+P1         # PID
+0          # Arrival time
+3          # Burst time
+P2         # PID
+1          # Arrival time
+3          # Burst time
+2          # Exit post-simulation
+```
+
+Output:
+```text
+============================================================
+                    SIMULATION SUMMARY
+============================================================
+Algorithm:                Round Robin (RR)
+Process Count:            2
+Total Simulation Time:    6
+CPU Busy Time:            6
+CPU Idle Time:            0
+CPU Utilization:          100.00%
+============================================================
+
+Process Execution Details:
+PID       Arrival   Burst  Completion  Turnaround   Waiting  Response
+---------------------------------------------------------
+P1              0       3           5           5         2         0
+P2              1       3           6           5         2         1
+---------------------------------------------------------
+
+============================================================
+                     AGGREGATE METRICS
+============================================================
+Average Turnaround Time:    5.00
+Average Waiting Time:       2.00
+Average Response Time:      0.50
+CPU Utilization:            100.00%
+============================================================
+
+Execution Timeline:
+  [0 - 2: P1] [2 - 4: P2] [4 - 5: P1] [5 - 6: P2]
 ```
 
 ---
@@ -324,11 +448,12 @@ CPU Scheduling Simulator/
 ├── vcpkg.json                  # vcpkg manifest defining dependencies (GoogleTest)
 ├── .gitignore                  # Git ignore rules for build artifacts and IDE files
 ├── README.md                   # Project overview, algorithm guide, and instructions
-├── BATCH_5_IMPLEMENTATION_REPORT.md # Batch 5 implementation report
-├── BATCH_6_IMPLEMENTATION_REPORT.md # Batch 6 implementation report
-├── BATCH_7_IMPLEMENTATION_REPORT.md # Batch 7 implementation report
-├── BATCH_8_IMPLEMENTATION_REPORT.md # Batch 8 implementation report
-├── BATCH_9_IMPLEMENTATION_REPORT.md # Batch 9 implementation report
+├── BATCH_5_IMPLEMENTATION_REPORT.md  # Batch 5 implementation report
+├── BATCH_6_IMPLEMENTATION_REPORT.md  # Batch 6 implementation report
+├── BATCH_7_IMPLEMENTATION_REPORT.md  # Batch 7 implementation report
+├── BATCH_8_IMPLEMENTATION_REPORT.md  # Batch 8 implementation report
+├── BATCH_9_IMPLEMENTATION_REPORT.md  # Batch 9 implementation report
+├── BATCH_10_IMPLEMENTATION_REPORT.md # Batch 10 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -345,6 +470,7 @@ CPU Scheduling Simulator/
 │       ├── mlq_scheduler.hpp    # Multilevel Queue (MLQ) scheduling engine
 │       ├── mlfq_scheduler.hpp   # Multilevel Feedback Queue (MLFQ) scheduling engine
 │       ├── scheduling_engine.hpp# Unified scheduling engine & central dispatcher
+│       ├── cli.hpp              # Interactive CLI controller and stream formatters
 │       └── gantt_chart.hpp      # Text-based Gantt chart renderer
 │
 ├── src/
@@ -361,6 +487,8 @@ CPU Scheduling Simulator/
 │   ├── mlq_scheduler.cpp
 │   ├── mlfq_scheduler.cpp
 │   ├── scheduling_engine.cpp
+│   ├── cli.cpp
+│   ├── cli_main.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -374,12 +502,13 @@ CPU Scheduling Simulator/
 │   ├── test_priority_scheduler.cpp # Tests for Priority scheduling engines (68 tests)
 │   ├── test_mlq_scheduler.cpp  # Tests for Multilevel Queue scheduling engine (77 tests)
 │   ├── test_mlfq_scheduler.cpp # Tests for Multilevel Feedback Queue scheduling engine (77 tests)
-│   └── test_scheduling_engine.cpp # Tests for Unified Scheduling Engine & Dispatcher (39 tests)
+│   ├── test_scheduling_engine.cpp # Tests for Unified Scheduling Engine & Dispatcher (39 tests)
+│   └── test_cli.cpp            # Tests for Interactive CLI Controller & Workflows (24 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation
 │
 └── examples/
     ├── CMakeLists.txt          # Example runner target
-    └── basic_usage.cpp         # Demonstrates all 6 algorithms side-by-side
+    └── basic_usage.cpp         # Demonstrates scheduling algorithms side-by-side
 ```
