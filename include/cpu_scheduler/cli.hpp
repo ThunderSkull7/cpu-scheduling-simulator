@@ -61,10 +61,13 @@ public:
                                 const std::vector<ExecutionSegment>& timeline);
     static void format_error(std::ostream& out,
                              const ScheduleError& error);
+    static void format_csv_export_menu(std::ostream& out);
 
     // Prompting helpers
     [[nodiscard]] std::optional<int> prompt_menu_choice();
     [[nodiscard]] std::optional<std::vector<Process>> prompt_workload(SchedulingAlgorithm algo);
+    [[nodiscard]] std::optional<std::vector<Process>> prompt_csv_workload();
+    void prompt_csv_export_menu(const SchedulingResult& result);
     [[nodiscard]] std::optional<RoundRobinConfig> prompt_rr_config();
     [[nodiscard]] std::optional<MlqWorkload> prompt_mlq_workload();
     [[nodiscard]] std::optional<MlfqConfig> prompt_mlfq_config();

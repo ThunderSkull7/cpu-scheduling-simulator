@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 11 — Gantt Chart and Scheduling Results Renderer
+## Current Status: Batch 12 — CSV Workload Import and Results Export
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -22,9 +22,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Interactive CLI Application**: Decoupled, stream-based interactive command-line interface (`CliController`) supporting interactive menu navigation, field-level workload input and validation, algorithm configurations (RR, MLQ, MLFQ), simulation dispatch through `SchedulingEngine`, aligned tabular results, metrics reporting, and multi-simulation sessions.
 - [x] **Advanced Gantt Chart Renderer**: Duration-aware text Gantt chart generator (`GanttChart`) with proportional block scaling, boundary timestamp alignment under segment borders, multi-row wrapping at configurable character widths, explicit idle tracking, Unicode box-drawing support, and MLQ queue metadata visualization.
 - [x] **Dedicated Results Presentation Engine**: Modular formatting engine (`ResultsRenderer`) delivering structured Simulation Summaries, aligned tabular process execution details, aggregate metrics, chronological timelines, and integrated full reports.
+- [x] **RFC 4180 CSV Engine**: Built-in compliant CSV parser (`CsvParser`) supporting quoted fields, escaped quotes (`""`), embedded commas, CRLF/LF line endings, and syntax error detection.
+- [x] **Workload CSV Importer**: Type-safe workload ingestion engine (`WorkloadImporter`) supporting required (`process_id`, `arrival_time`, `burst_time`) and optional (`priority`, `queue_id`) columns, case-insensitive headers, trimmed whitespace, all-or-nothing validation, duplicate ID rejection, and row diagnostics.
+- [x] **Results CSV Exporter**: Robust export engine (`CsvExporter`) producing spreadsheet-compatible process execution metrics and chronological execution timeline CSVs with formula injection mitigation (`=`, `+`, `-`, `@`) and safe atomic file writing.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
-- [x] **Unit Testing Suite**: **532 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, interactive CLI workflows, Gantt chart layouts, and results formatting.
-- [ ] **Workload Import & Export (CSV, JSON)** *(Planned - Batch 12)*
+- [x] **Unit Testing Suite**: **571 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, interactive CLI workflows, Gantt chart layouts, results formatting, CSV parser, workload importer, results exporter, security injection defense, and CLI CSV workflows.*
 
 ---
 
@@ -468,6 +470,36 @@ Batch 11 introduces an advanced, duration-aware text-based Gantt chart renderer 
 
 ---
 
+
+---
+
+## CSV Workload Import and Results Export
+
+Batch 12 delivers production-grade CSV import and export capabilities:
+
+### 1. Workload CSV Schema
+Standard format for importing process workloads:
+```csv
+process_id,arrival_time,burst_time,priority,queue_id
+P1,0,5,2,Q_High
+P2,1,3,1,Q_High
+P3,2,8,3,Q_Low
+```
+- **Required Columns**: `process_id` (aliases: `pid`, `process`), `arrival_time` (aliases: `arrival`), `burst_time` (aliases: `burst`).
+- **Optional Columns**: `priority` (aliases: `prio`, default 0), `queue_id` (aliases: `queue`, for MLQ bindings).
+- **Validation**: Headers are matched case-insensitively with surrounding whitespace ignored. Unsupported columns and duplicate headers are rejected. Row-level validation provides 1-based error messages for missing IDs, duplicates, negative arrival times, non-positive burst times, non-integers, and row counts exceeding the 100 process limit. All-or-nothing semantics guarantee that either the entire workload imports or none of it does.
+
+### 2. Process Metrics & Timeline Export
+- **Process Metrics CSV**: Exports `process_id,arrival_time,burst_time,completion_time,turnaround_time,waiting_time,response_time,priority,queue_id` suitable for spreadsheet analysis.
+- **Timeline CSV**: Exports `start_time,end_time,process_id,queue_id` with explicit `IDLE` intervals and preserved chronological order.
+- **Formula Injection Mitigation**: Text fields (`process_id`, `queue_id`) beginning with `=`, `+`, `-`, or `@` are neutralized with an apostrophe prefix (`'`) at export boundaries. Numeric columns (`arrival_time`, `burst_time`, `priority`, etc.) remain pure numbers and in-memory results are unmodified.
+- **Safe File Writing**: Export operations write to a temporary file (`.tmp`) before atomic replacement, guarding against interrupted writes or corrupted files.
+
+### 3. Sample CSV Files
+- [`sample_workload.csv`](file:///examples/sample_workload.csv): Basic FCFS/SJF/SRTF/RR workload without priorities.
+- [`sample_workload_with_priority.csv`](file:///examples/sample_workload_with_priority.csv): Workload with priority values for Priority scheduling.
+- [`sample_workload_mlq.csv`](file:///examples/sample_workload_mlq.csv): Workload with static queue assignments for Multilevel Queue scheduling.
+
 ## Project Structure
 
 ```text
@@ -485,6 +517,7 @@ CPU Scheduling Simulator/
 ├── BATCH_9_IMPLEMENTATION_REPORT.md  # Batch 9 implementation report
 ├── BATCH_10_IMPLEMENTATION_REPORT.md # Batch 10 implementation report
 ├── BATCH_11_IMPLEMENTATION_REPORT.md # Batch 11 implementation report
+├── BATCH_12_IMPLEMENTATION_REPORT.md # Batch 12 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -503,7 +536,10 @@ CPU Scheduling Simulator/
 │       ├── scheduling_engine.hpp# Unified scheduling engine & central dispatcher
 │       ├── cli.hpp              # Interactive CLI controller and stream formatters
 │       ├── results_renderer.hpp # Results presentation engine (Summary, Tables, Metrics)
-│       └── gantt_chart.hpp      # Duration-aware Gantt chart renderer (ASCII/Unicode)
+│       ├── gantt_chart.hpp      # Duration-aware Gantt chart renderer (ASCII/Unicode)
+│       ├── csv_parser.hpp       # RFC 4180 compliant CSV parser
+│       ├── workload_importer.hpp# CSV workload importer & validation diagnostics
+│       └── csv_exporter.hpp     # Spreadsheet-safe CSV exporter & formula injection mitigation
 │
 ├── src/
 │   ├── process.cpp
@@ -522,7 +558,10 @@ CPU Scheduling Simulator/
 │   ├── cli.cpp
 │   ├── cli_main.cpp
 │   ├── results_renderer.cpp
-│   └── gantt_chart.cpp
+│   ├── gantt_chart.cpp
+│   ├── csv_parser.cpp
+│   ├── workload_importer.cpp
+│   └── csv_exporter.cpp
 │
 ├── tests/
 │   ├── CMakeLists.txt          # GoogleTest suite target
@@ -538,7 +577,11 @@ CPU Scheduling Simulator/
 │   ├── test_scheduling_engine.cpp # Tests for Unified Scheduling Engine & Dispatcher (39 tests)
 │   ├── test_cli.cpp            # Tests for Interactive CLI Controller & Workflows (24 tests)
 │   ├── test_gantt_chart.cpp    # Tests for Advanced Gantt Chart Visualization (13 tests)
-│   └── test_results_renderer.cpp # Tests for Results Presentation Engine (8 tests)
+│   ├── test_results_renderer.cpp # Tests for Results Presentation Engine (8 tests)
+│   ├── test_csv_parser.cpp     # Tests for RFC 4180 CSV parser (11 tests)
+│   ├── test_csv_workload_importer.cpp # Tests for CSV Workload Importer (17 tests)
+│   ├── test_csv_results_exporter.cpp  # Tests for CSV Exporter & Formula Injection (8 tests)
+│   └── test_cli_csv.cpp        # Tests for CLI CSV workflows (3 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation

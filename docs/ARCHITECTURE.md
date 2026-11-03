@@ -283,10 +283,35 @@ flowchart TD
   3. **Dual String & Stream Interfaces**: Every rendering method is provided as both an `std::string` returning function and a stream-writing overload (`std::ostream&`), preventing unnecessary string allocations for large simulations.
   4. **Strict Decoupling**: Free of scheduler internals, execution engines, or terminal UI control logic.
 
+### 2.17 CSV Parsing Engine (`cpu_scheduler::CsvParser`) — **Implemented (Batch 12)**
+- **Location**: `include/cpu_scheduler/csv_parser.hpp`, `src/csv_parser.cpp`
+- **Role**: Reusable RFC 4180 compliant CSV document parser.
+- **Architectural Responsibilities**:
+  1. **Standard RFC 4180 Parsing**: Handles quoted fields, embedded commas, escaped quotes (`""`), multi-line fields, CRLF and LF line endings, empty fields, and missing trailing newlines.
+  2. **Syntax Diagnostic Engine**: Flags unclosed quotes, premature characters after closing quotes, and malformed quoting with precise 1-based line and column coordinates.
+  3. **Universal Input Ingestion**: Supports parsing from string views, input streams (`std::istream&`), and disk file paths.
+
+### 2.18 Workload Ingestion Engine (`cpu_scheduler::WorkloadImporter`) — **Implemented (Batch 12)**
+- **Location**: `include/cpu_scheduler/workload_importer.hpp`, `src/workload_importer.cpp`
+- **Role**: Validates and converts parsed CSV rows into typed `Process` workloads.
+- **Architectural Responsibilities**:
+  1. **Schema Validation**: Requires `process_id`, `arrival_time`, and `burst_time` columns; identifies optional `priority` and `queue_id` columns; rejects unrecognized headers and duplicate columns.
+  2. **Row-Level Integrity & Diagnostics**: Implements comprehensive checks for empty IDs, duplicate IDs (case-insensitive and trimmed), negative arrival times, non-positive burst times, non-integer values, and field count mismatches with exact row-numbered diagnostic messages.
+  3. **All-or-Nothing Safety**: Enforces complete transactionality—if any row fails validation, no partial workload is returned.
+  4. **Record Count Bounding**: Protects simulator state by enforcing a configurable maximum record count limit (default 100).
+
+### 2.19 Results Export Engine (`cpu_scheduler::CsvExporter`) — **Implemented (Batch 12)**
+- **Location**: `include/cpu_scheduler/csv_exporter.hpp`, `src/csv_exporter.cpp`
+- **Role**: Serializes simulation outcomes into spreadsheet-compatible CSV documents.
+- **Architectural Responsibilities**:
+  1. **Dual Export Formats**: Emits Process Execution Metrics (`process_id,arrival_time,burst_time,completion_time,turnaround_time,waiting_time,response_time,priority,queue_id`) and Execution Timeline (`start_time,end_time,process_id,queue_id`).
+  2. **Formula Injection Defense (CSV Injection)**: Proactively neutralizes potential spreadsheet formula execution characters (`=`, `+`, `-`, `@`) in text fields via single-quote escaping at export boundaries while strictly preserving numeric fields and in-memory results.
+  3. **Safe Atomic File Operations**: Writes export data to a temporary file (`.tmp`) before atomic renaming, preventing corrupted or partially written files upon disk errors.
+
 ---
 
-## 3. Future Scheduling Simulator Extensions (Batches 12+)
+## 3. Future Scheduling Simulator Extensions (Batches 13+)
 
 The established architecture cleanly facilitates future extensions:
-- **Workload Import & Export**: CSV/JSON file ingestion and output serialization (Batch 12).
 - **Statistical Analytics & Benchmarking**: Algorithm comparison matrices and batch statistical benchmarking.
+- **Graphical & GUI Interfaces**: Desktop or web visual frontend consuming exported simulation data.

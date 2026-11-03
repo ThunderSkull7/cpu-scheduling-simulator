@@ -1,0 +1,5 @@
+process_id,arrival_time,burst_time,priority,queue_id
+P1,0,4,1,Q_Interactive
+P2,0,6,2,Q_Interactive
+P3,2,8,0,Q_Batch
+P4,4,3,1,Q_Batch

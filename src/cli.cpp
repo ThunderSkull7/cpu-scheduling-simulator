@@ -1,4 +1,7 @@
 #include "cpu_scheduler/cli.hpp"
+#include "cpu_scheduler/csv_exporter.hpp"
+#include "cpu_scheduler/workload_importer.hpp"
+#include <filesystem>
 
 #include "cpu_scheduler/process_validator.hpp"
 
@@ -200,6 +203,16 @@ void CliController::format_timeline(std::ostream& out,
     out << "\n";
 }
 
+void CliController::format_csv_export_menu(std::ostream& out) {
+    out << "\n------------------------------------------------------------\n";
+    out << "CSV Export Options:\n";
+    out << "  1. Export process metrics CSV\n";
+    out << "  2. Export execution timeline CSV\n";
+    out << "  3. Export both to CSV\n";
+    out << "  4. Return\n";
+    out << "------------------------------------------------------------\n";
+}
+
 void CliController::format_error(std::ostream& out,
                                  const ScheduleError& error) {
     out << "\n============================================================\n";
@@ -274,7 +287,13 @@ std::optional<int> CliController::prompt_menu_choice() {
 
 std::optional<std::vector<Process>> CliController::prompt_workload(SchedulingAlgorithm algo) {
     out_ << "\n--- Workload Configuration ---\n";
-    auto num_procs = read_int("Enter number of processes (1-100): ", 1, 100);
+    auto num_procs = read_int("Enter number of processes (1-100) or 0 to import from CSV: ", 0, 100);
+    if (!num_procs.has_value()) {
+        return std::nullopt;
+    }
+    if (*num_procs == 0) {
+        return prompt_csv_workload();
+    }
     if (!num_procs.has_value()) {
         return std::nullopt;
     }
@@ -335,6 +354,88 @@ std::optional<std::vector<Process>> CliController::prompt_workload(SchedulingAlg
     }
 
     return processes;
+}
+
+std::optional<std::vector<Process>> CliController::prompt_csv_workload() {
+    out_ << "\n--- CSV Workload Import ---\n";
+    while (true) {
+        out_ << "Enter CSV workload file path (or 'cancel' to return): ";
+        auto path_str = read_line();
+        if (!path_str.has_value()) {
+            return std::nullopt;
+        }
+        if (path_str->empty()) {
+            out_ << "Error: File path cannot be empty. Please try again.\n";
+            continue;
+        }
+        if (*path_str == "cancel" || *path_str == "c") {
+            return std::nullopt;
+        }
+
+        std::filesystem::path p(*path_str);
+        auto res = WorkloadImporter::import_from_file(p);
+        if (res.success) {
+            out_ << "Successfully imported " << res.processes.size()
+                 << " process(es) from '" << *path_str << "'.\n";
+            return res.processes;
+        }
+
+        out_ << "\nError: CSV import failed with " << res.errors.size() << " error(s):\n";
+        for (const auto& err : res.errors) {
+            out_ << "  - " << err.to_string() << "\n";
+        }
+        out_ << "Please correct the file or try again.\n";
+    }
+}
+
+void CliController::prompt_csv_export_menu(const SchedulingResult& result) {
+    while (true) {
+        format_csv_export_menu(out_);
+        auto choice = read_int("Enter selection (1-4): ", 1, 4);
+        if (!choice.has_value() || *choice == 4) {
+            return;
+        }
+
+        if (*choice == 1 || *choice == 3) {
+            out_ << "Enter destination path for process metrics CSV [default: process_metrics.csv]: ";
+            auto p_str = read_line();
+            std::string metrics_path = (p_str && !p_str->empty()) ? *p_str : "process_metrics.csv";
+            bool overwrite = true;
+            if (std::filesystem::exists(metrics_path)) {
+                out_ << "File '" << metrics_path << "' already exists. Overwrite? (y/n) [default: y]: ";
+                auto ans = read_line();
+                if (ans && (*ans == "n" || *ans == "N" || *ans == "no")) {
+                    overwrite = false;
+                }
+            }
+            auto res = CsvExporter::export_process_metrics_to_file(metrics_path, result, overwrite);
+            if (res.success) {
+                out_ << "Successfully exported process metrics to '" << metrics_path << "'.\n";
+            } else {
+                out_ << "Error exporting process metrics: " << res.error_message << "\n";
+            }
+        }
+
+        if (*choice == 2 || *choice == 3) {
+            out_ << "Enter destination path for execution timeline CSV [default: execution_timeline.csv]: ";
+            auto p_str = read_line();
+            std::string timeline_path = (p_str && !p_str->empty()) ? *p_str : "execution_timeline.csv";
+            bool overwrite = true;
+            if (std::filesystem::exists(timeline_path)) {
+                out_ << "File '" << timeline_path << "' already exists. Overwrite? (y/n) [default: y]: ";
+                auto ans = read_line();
+                if (ans && (*ans == "n" || *ans == "N" || *ans == "no")) {
+                    overwrite = false;
+                }
+            }
+            auto res = CsvExporter::export_timeline_to_file(timeline_path, result, overwrite);
+            if (res.success) {
+                out_ << "Successfully exported execution timeline to '" << timeline_path << "'.\n";
+            } else {
+                out_ << "Error exporting execution timeline: " << res.error_message << "\n";
+            }
+        }
+    }
 }
 
 std::optional<RoundRobinConfig> CliController::prompt_rr_config() {
@@ -612,8 +713,9 @@ std::optional<int> CliController::prompt_post_simulation_choice() {
     out_ << "Options:\n";
     out_ << "  1. Run another simulation\n";
     out_ << "  2. Exit\n";
+    out_ << "  3. Export results to CSV\n";
     out_ << "------------------------------------------------------------\n";
-    return read_int("Enter selection (1-2): ", 1, 2);
+    return read_int("Enter selection (1-3): ", 1, 3);
 }
 
 bool CliController::execute_simulation_cycle() {
@@ -688,16 +790,27 @@ bool CliController::execute_simulation_cycle() {
         gantt_opts.show_queue_id = show_queue;
         format_gantt_chart(out_, result, gantt_opts);
         format_timeline(out_, result.timeline());
+
+        while (true) {
+            auto post_choice = prompt_post_simulation_choice();
+            if (!post_choice.has_value() || *post_choice == 2) {
+                return false;
+            }
+            if (*post_choice == 1) {
+                return true;
+            }
+            if (*post_choice == 3) {
+                prompt_csv_export_menu(result);
+            }
+        }
     } else {
         format_error(out_, outcome.error());
+        auto post_choice = prompt_post_simulation_choice();
+        if (!post_choice.has_value() || *post_choice == 2) {
+            return false;
+        }
+        return true;
     }
-
-    auto post_choice = prompt_post_simulation_choice();
-    if (!post_choice.has_value() || *post_choice == 2) {
-        return false;
-    }
-
-    return true;
 }
 
 } // namespace cpu_scheduler

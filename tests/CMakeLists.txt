@@ -12,6 +12,10 @@ add_executable(cpu_scheduler_tests
     test_cli.cpp
     test_gantt_chart.cpp
     test_results_renderer.cpp
+    test_csv_parser.cpp
+    test_csv_workload_importer.cpp
+    test_csv_results_exporter.cpp
+    test_cli_csv.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests

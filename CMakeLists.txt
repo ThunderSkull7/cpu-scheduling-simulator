@@ -33,6 +33,9 @@ add_library(cpu_scheduler_lib
     src/scheduling_engine.cpp
     src/gantt_chart.cpp
     src/results_renderer.cpp
+    src/csv_parser.cpp
+    src/workload_importer.cpp
+    src/csv_exporter.cpp
     src/cli.cpp
 )
 
