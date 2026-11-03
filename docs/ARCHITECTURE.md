@@ -251,10 +251,18 @@ flowchart TD
   4. **Zero Duplication & Full Compatibility**: Directly executes existing schedulers and preserves structured outcomes (`ScheduleOutcome`, `SchedulingResult`, `ScheduleError`).
   5. **Introspection Helpers**: Provides reflection and string conversion utilities (`to_string`, `algorithm_name`, `algorithm_from_string`, `supported_algorithms`).
 
-### 2.14 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Implemented (Batch 2)**
-- **Location**: `include/cpu_scheduler/gantt_chart.hpp`
-- **Role**: Generates ASCII Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
-- **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms. Naturally formats multiple execution slices per process and idle intervals.
+### 2.14 Gantt Chart Renderer (`cpu_scheduler::GanttChart`) — **Enhanced (Batch 11)**
+- **Location**: `include/cpu_scheduler/gantt_chart.hpp`, `src/gantt_chart.cpp`
+- **Role**: Generates text-based Gantt charts from `SchedulingResult` or raw `ExecutionSegment` spans.
+- **Architectural Responsibilities**:
+  1. **Duration-Aware Proportional Widths**: Scales block widths based on execution slice duration relative to minimum duration, clamped between `min_block_width` and `max_block_width`.
+  2. **Timestamp Axis Alignment**: Accurately places timestamps directly beneath block boundary markers (`+` or `|`), preventing numeric displacement across long or varied durations.
+  3. **Multi-Row Wrapping**: Automatically wraps long schedules onto consecutive rows when accumulated line width reaches `max_row_width` (default 80 columns), preserving continuous timeline readability.
+  4. **Idle Interval Visualization**: Explicitly displays CPU idle gaps with proportional widths and clear start/finish boundary timestamps.
+  5. **Preemption Support**: Seamlessly renders repeated execution slices belonging to the same process.
+  6. **Queue Metadata Support**: Includes queue metadata (e.g. `P1 [Q0]`) when available and enabled.
+  7. **Border Styling**: Configurable ASCII (`+`, `-`, `|`) and Unicode box-drawing character modes.
+  8. **Decoupling**: Contains zero scheduling or simulation logic. Reused identically across all scheduling algorithms.
 
 ### 2.15 Interactive CLI Controller (`cpu_scheduler::CliController`) — **Implemented (Batch 10)**
 - **Location**: `include/cpu_scheduler/cli.hpp`, `src/cli.cpp`, `src/cli_main.cpp`
@@ -264,13 +272,21 @@ flowchart TD
   2. **Unified Scheduling Engine Integration**: Binds user selections exclusively to `SchedulingRequest` and dispatches via `SchedulingEngine::execute`, with zero scheduling algorithm reimplementation.
   3. **Field-Level Validation & Retry**: Implements field-by-field validation loops for process IDs (uniqueness, whitespace), non-negative arrival times, positive burst times, priorities, queue assignments, and algorithm configurations.
   4. **Graceful Stream & Error Handling**: Seamlessly detects EOF without entering infinite loops, avoids stream corruption, prevents numeric overflows via checked parsers, and presents structured validation error diagnostics.
-  5. **Rich Text Formatting**: Formats simulation banners, main menus, simulation summaries, aligned tabular process execution states, aggregate metrics, and chronological execution timelines.
+  5. **Rich Text Formatting & Gantt Visualization**: Formats simulation banners, main menus, simulation summaries, aligned tabular process execution states, aggregate metrics, chronological execution timelines, and automatic Gantt chart display.
+
+### 2.16 Dedicated Results Presentation Engine (`cpu_scheduler::ResultsRenderer`) — **Implemented (Batch 11)**
+- **Location**: `include/cpu_scheduler/results_renderer.hpp`, `src/results_renderer.cpp`
+- **Role**: Standalone formatting engine responsible for turning `SchedulingResult` into structured presentation reports.
+- **Architectural Responsibilities**:
+  1. **Modular Components**: Exposes dedicated rendering methods for Simulation Summary (`render_summary`), Process Table (`render_process_table`), Aggregate Metrics (`render_aggregate_metrics`), Execution Timeline (`render_timeline`), and Gantt Chart (`render_gantt_chart`).
+  2. **Full Report Composition**: `render_full_report` composes all components into a complete, presentation-ready report with configurable inclusion options via `RenderOptions`.
+  3. **Dual String & Stream Interfaces**: Every rendering method is provided as both an `std::string` returning function and a stream-writing overload (`std::ostream&`), preventing unnecessary string allocations for large simulations.
+  4. **Strict Decoupling**: Free of scheduler internals, execution engines, or terminal UI control logic.
 
 ---
 
-## 3. Future Scheduling Simulator Extensions (Batches 11+)
+## 3. Future Scheduling Simulator Extensions (Batches 12+)
 
 The established architecture cleanly facilitates future extensions:
-- **Graphical & Advanced Gantt Chart Visualization**: Enhanced ASCII/ANSI and graphical timeline rendering (Batch 11).
-- **Workload Import & Export**: CSV/JSON file ingestion and output serialization (Batches 11–12).
+- **Workload Import & Export**: CSV/JSON file ingestion and output serialization (Batch 12).
 - **Statistical Analytics & Benchmarking**: Algorithm comparison matrices and batch statistical benchmarking.

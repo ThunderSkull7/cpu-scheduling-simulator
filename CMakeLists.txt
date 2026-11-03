@@ -32,6 +32,7 @@ add_library(cpu_scheduler_lib
     src/mlfq_scheduler.cpp
     src/scheduling_engine.cpp
     src/gantt_chart.cpp
+    src/results_renderer.cpp
     src/cli.cpp
 )
 

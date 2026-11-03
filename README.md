@@ -4,7 +4,7 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 
 ---
 
-## Current Status: Batch 10 — Interactive Command-Line Interface (CLI)
+## Current Status: Batch 11 — Gantt Chart and Scheduling Results Renderer
 
 - [x] **Core Process Model**: Immutable workload data structure (`Process`) with 64-bit time representations and priority integers.
 - [x] **Input Validation Engine**: Comprehensive workload verification (`ProcessValidator`) with multi-error reporting.
@@ -20,10 +20,11 @@ A high-performance, modular C++20 simulator for standard Operating System CPU sc
 - [x] **Multilevel Feedback Queue (MLFQ) Scheduling Engine**: Dynamic priority feedback scheduler (`MlfqScheduler`) featuring multiple priority levels, initial Q0 admission, dynamic demotion via per-level CPU allotments, preemption by higher-priority arrivals without allotment reset, configurable periodic priority boosting to prevent starvation, and timeline normalization.
 - [x] **Unified Scheduling Engine & Central Dispatcher**: Type-safe central execution dispatcher (`SchedulingEngine` / `UnifiedScheduler`) supporting uniform execution of all 8 algorithms through a consistent `SchedulingRequest` interface, configuration validation, introspection, and result compatibility.
 - [x] **Interactive CLI Application**: Decoupled, stream-based interactive command-line interface (`CliController`) supporting interactive menu navigation, field-level workload input and validation, algorithm configurations (RR, MLQ, MLFQ), simulation dispatch through `SchedulingEngine`, aligned tabular results, metrics reporting, and multi-simulation sessions.
+- [x] **Advanced Gantt Chart Renderer**: Duration-aware text Gantt chart generator (`GanttChart`) with proportional block scaling, boundary timestamp alignment under segment borders, multi-row wrapping at configurable character widths, explicit idle tracking, Unicode box-drawing support, and MLQ queue metadata visualization.
+- [x] **Dedicated Results Presentation Engine**: Modular formatting engine (`ResultsRenderer`) delivering structured Simulation Summaries, aligned tabular process execution details, aggregate metrics, chronological timelines, and integrated full reports.
 - [x] **Scheduling Metrics**: Comprehensive calculation of Turnaround Time, Waiting Time, Response Time, CPU Utilization, and system averages.
-- [x] **Gantt Chart Foundation**: Text-based ASCII Gantt chart renderer (`GanttChart`) supporting multiple execution segments per process and idle intervals.
-- [x] **Unit Testing Suite**: **511 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, and interactive CLI controller workflows.
-- [ ] **Advanced Gantt Chart Visualization** *(Planned - Batch 11)*
+- [x] **Unit Testing Suite**: **532 GoogleTest unit tests** covering all model invariants, validation rules, all 8 scheduling engines, unified scheduling engine integration, interactive CLI workflows, Gantt chart layouts, and results formatting.
+- [ ] **Workload Import & Export (CSV, JSON)** *(Planned - Batch 12)*
 
 ---
 
@@ -432,9 +433,38 @@ Average Response Time:      0.50
 CPU Utilization:            100.00%
 ============================================================
 
+Gantt Chart:
++------------------------+------------------------+-------+-------+
+|           P1           |           P2           |  P1   |  P2   |
++------------------------+------------------------+-------+-------+
+0                        2                        4       5       6
+
 Execution Timeline:
   [0 - 2: P1] [2 - 4: P2] [4 - 5: P1] [5 - 6: P2]
 ```
+
+---
+
+## Gantt Chart & Results Renderer
+
+Batch 11 introduces an advanced, duration-aware text-based Gantt chart renderer (`GanttChart`) and a dedicated results formatting engine (`ResultsRenderer`):
+
+### 1. Duration-Aware Gantt Chart Renderer (`GanttChart`)
+- **Proportional Scaling**: Automatically scales block widths based on execution slice durations relative to the minimum segment duration.
+- **Timestamp Alignment**: Timestamps on the timeline axis align precisely beneath block boundary characters (`+` or `|`), preventing numeric jitter or displacement.
+- **Multi-Row Wrapping**: Automatically wraps wide schedules across multiple rows when the accumulated width exceeds `max_row_width` (default 80 columns), continuing timestamps cleanly on subsequent rows.
+- **Explicit CPU Idle Intervals**: Unscheduled CPU time intervals are rendered explicitly with duration-scaled `Idle` blocks and exact start/end boundary markers.
+- **Preemption & Slicing**: Seamlessly displays repeated process segments resulting from preemptive scheduling (SRTF, Round Robin, Preemptive Priority, MLQ, MLFQ).
+- **Queue Metadata Support**: Visualizes assigned queue identifiers (e.g. `P1 [Q0]`) for Multilevel Queue simulations.
+- **Border Styles**: Supports both standard ASCII (`+`, `-`, `|`) and clean Unicode box-drawing characters (`┌`, `─`, `┬`, `┐`, `│`, `└`, `┴`, `┘`).
+
+### 2. Dedicated Results Presentation Engine (`ResultsRenderer`)
+- `render_summary()`: Top-level simulation metrics (algorithm, process count, total time, busy/idle breakdown, CPU utilization).
+- `render_process_table()`: Formatted tabular process states with dynamic columns (Priority, Queue ID) based on algorithm requirements.
+- `render_aggregate_metrics()`: Formatted system-wide averages for turnaround, waiting, and response times.
+- `render_timeline()`: Compact chronological string of execution segments (`[0 - 2: P1] [2 - 4: Idle] ...`).
+- `render_gantt_chart()`: Seamlessly delegates to `GanttChart::render()` with configurable options.
+- `render_full_report()`: Comprehensive presentation combining all five components into a cohesive simulation report (available as `std::string` or direct stream output to `std::ostream&`).
 
 ---
 
@@ -454,6 +484,7 @@ CPU Scheduling Simulator/
 ├── BATCH_8_IMPLEMENTATION_REPORT.md  # Batch 8 implementation report
 ├── BATCH_9_IMPLEMENTATION_REPORT.md  # Batch 9 implementation report
 ├── BATCH_10_IMPLEMENTATION_REPORT.md # Batch 10 implementation report
+├── BATCH_11_IMPLEMENTATION_REPORT.md # Batch 11 implementation report
 │
 ├── include/
 │   └── cpu_scheduler/
@@ -471,7 +502,8 @@ CPU Scheduling Simulator/
 │       ├── mlfq_scheduler.hpp   # Multilevel Feedback Queue (MLFQ) scheduling engine
 │       ├── scheduling_engine.hpp# Unified scheduling engine & central dispatcher
 │       ├── cli.hpp              # Interactive CLI controller and stream formatters
-│       └── gantt_chart.hpp      # Text-based Gantt chart renderer
+│       ├── results_renderer.hpp # Results presentation engine (Summary, Tables, Metrics)
+│       └── gantt_chart.hpp      # Duration-aware Gantt chart renderer (ASCII/Unicode)
 │
 ├── src/
 │   ├── process.cpp
@@ -489,6 +521,7 @@ CPU Scheduling Simulator/
 │   ├── scheduling_engine.cpp
 │   ├── cli.cpp
 │   ├── cli_main.cpp
+│   ├── results_renderer.cpp
 │   └── gantt_chart.cpp
 │
 ├── tests/
@@ -503,7 +536,9 @@ CPU Scheduling Simulator/
 │   ├── test_mlq_scheduler.cpp  # Tests for Multilevel Queue scheduling engine (77 tests)
 │   ├── test_mlfq_scheduler.cpp # Tests for Multilevel Feedback Queue scheduling engine (77 tests)
 │   ├── test_scheduling_engine.cpp # Tests for Unified Scheduling Engine & Dispatcher (39 tests)
-│   └── test_cli.cpp            # Tests for Interactive CLI Controller & Workflows (24 tests)
+│   ├── test_cli.cpp            # Tests for Interactive CLI Controller & Workflows (24 tests)
+│   ├── test_gantt_chart.cpp    # Tests for Advanced Gantt Chart Visualization (13 tests)
+│   └── test_results_renderer.cpp # Tests for Results Presentation Engine (8 tests)
 │
 ├── docs/
 │   └── ARCHITECTURE.md         # Component boundaries and lifecycle documentation

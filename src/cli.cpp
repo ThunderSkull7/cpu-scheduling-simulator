@@ -168,6 +168,13 @@ void CliController::format_aggregate_metrics(std::ostream& out,
     out << "============================================================\n";
 }
 
+void CliController::format_gantt_chart(std::ostream& out,
+                                       const SchedulingResult& result,
+                                       const GanttOptions& options) {
+    out << "\nGantt Chart:\n";
+    out << GanttChart::render(result, options);
+}
+
 void CliController::format_timeline(std::ostream& out,
                                     const std::vector<ExecutionSegment>& timeline) {
     out << "\nExecution Timeline:\n";
@@ -677,6 +684,9 @@ bool CliController::execute_simulation_cycle() {
         format_simulation_summary(out_, request, result);
         format_process_table(out_, result, show_priority, show_queue);
         format_aggregate_metrics(out_, result.metrics());
+        GanttOptions gantt_opts;
+        gantt_opts.show_queue_id = show_queue;
+        format_gantt_chart(out_, result, gantt_opts);
         format_timeline(out_, result.timeline());
     } else {
         format_error(out_, outcome.error());

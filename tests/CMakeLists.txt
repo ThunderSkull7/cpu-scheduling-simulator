@@ -10,6 +10,8 @@ add_executable(cpu_scheduler_tests
     test_mlfq_scheduler.cpp
     test_scheduling_engine.cpp
     test_cli.cpp
+    test_gantt_chart.cpp
+    test_results_renderer.cpp
 )
 
 target_link_libraries(cpu_scheduler_tests

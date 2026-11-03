@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cpu_scheduler/gantt_chart.hpp"
 #include "cpu_scheduler/mlfq_scheduler.hpp"
 #include "cpu_scheduler/mlq_scheduler.hpp"
 #include "cpu_scheduler/process.hpp"
@@ -53,6 +54,9 @@ public:
                                      bool show_queue);
     static void format_aggregate_metrics(std::ostream& out,
                                          const SchedulingMetrics& metrics);
+    static void format_gantt_chart(std::ostream& out,
+                                   const SchedulingResult& result,
+                                   const GanttOptions& options = {});
     static void format_timeline(std::ostream& out,
                                 const std::vector<ExecutionSegment>& timeline);
     static void format_error(std::ostream& out,
