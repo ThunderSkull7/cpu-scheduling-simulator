@@ -1,5 +1,9 @@
 # CPU Scheduling Simulator
 
+[![CI](https://github.com/ThunderSkull7/cpu-scheduling-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/ThunderSkull7/cpu-scheduling-simulator/actions/workflows/ci.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg?logo=c%2B%2B)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A modern, high-performance C++20 simulator for Operating System CPU scheduling algorithms. The project features eight scheduling engines, a unified execution dispatcher, duration-aware Gantt chart visualization, comprehensive metrics analysis, an interactive CLI, an RFC 4180 compliant CSV import/export pipeline, and an automated regression test suite with 601 tests.
 
 ---
@@ -248,6 +252,22 @@ Enter CSV workload file path: examples/sample_workload.csv
 
 ---
 
+## Project Scope & Roadmap
+
+### Implemented Scope
+- Eight core single-core CPU scheduling algorithms (FCFS, SJF, SRTF, RR, Priority Non-Preemptive, Priority Preemptive, MLQ, MLFQ).
+- Interactive stream-safe terminal CLI with CSV import/export.
+- Proportional text-based Gantt charts and structured performance metric reporting.
+- 601 automated unit, integration, and regression tests.
+
+### Future Possibilities (Roadmap)
+- Multiprocessor and multi-core scheduling simulation (e.g., partitioned vs global scheduling, affinity).
+- Dynamic I/O burst and multi-resource blocking models (CPU + Disk/Network I/O intervals).
+- Real-time scheduling algorithms (Earliest Deadline First / Rate Monotonic Scheduling).
+- Graphical / web-based interactive visualization frontend.
+
+---
+
 ## License
 
-This project is open-source educational software developed for operating system CPU scheduling simulation and analysis.
+This project is licensed under the [MIT License](LICENSE) — see the `LICENSE` file for full copyright and permission terms.

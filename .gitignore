@@ -24,3 +24,8 @@ vcpkg_installed/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local internal audit and publication reports (untracked historical records)
+BATCH_*_INDEPENDENT_AUDIT_REPORT.md
+BATCH_*_FOLLOWUP_INDEPENDENT_AUDIT_REPORT.md
+GITHUB_PUBLICATION_REPORT.md

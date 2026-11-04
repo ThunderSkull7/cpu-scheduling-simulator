@@ -9,6 +9,7 @@
 #include "cpu_scheduler/sjf_scheduler.hpp"
 #include "cpu_scheduler/srtf_scheduler.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -38,30 +39,39 @@ void display_schedule_result(std::string_view algorithm_name,
     std::cout << cpu_scheduler::GanttChart::render(result) << "\n";
 
     // 3. Process Metrics Table
+    std::size_t pid_width = 6;
+    for (const auto& ps : result.processes()) {
+        if (ps.process_id.length() + 2 > pid_width) {
+            pid_width = ps.process_id.length() + 2;
+        }
+    }
+    const int w_pid = static_cast<int>(pid_width);
+    const std::size_t table_width = pid_width + 80;
+
     std::cout << std::left
-              << std::setw(6)  << "PID"
-              << std::setw(10) << "Arrival"
-              << std::setw(8)  << "Burst"
-              << std::setw(10) << "Priority"
-              << std::setw(8)  << "Start"
-              << std::setw(12) << "Completion"
-              << std::setw(12) << "Turnaround"
-              << std::setw(10) << "Waiting"
-              << std::setw(10) << "Response"
+              << std::setw(w_pid) << "PID"
+              << std::setw(10)    << "Arrival"
+              << std::setw(8)     << "Burst"
+              << std::setw(10)    << "Priority"
+              << std::setw(8)     << "Start"
+              << std::setw(12)    << "Completion"
+              << std::setw(12)    << "Turnaround"
+              << std::setw(10)    << "Waiting"
+              << std::setw(10)    << "Response"
               << "\n";
-    std::cout << std::string(86, '-') << "\n";
+    std::cout << std::string(table_width, '-') << "\n";
 
     for (const auto& ps : result.processes()) {
         std::cout << std::left
-                  << std::setw(6)  << ps.process_id
-                  << std::setw(10) << ps.arrival_time
-                  << std::setw(8)  << ps.burst_time
-                  << std::setw(10) << ps.priority
-                  << std::setw(8)  << ps.start_time.value_or(-1)
-                  << std::setw(12) << ps.completion_time
-                  << std::setw(12) << ps.turnaround_time
-                  << std::setw(10) << ps.waiting_time
-                  << std::setw(10) << ps.response_time
+                  << std::setw(w_pid) << ps.process_id
+                  << std::setw(10)    << ps.arrival_time
+                  << std::setw(8)     << ps.burst_time
+                  << std::setw(10)    << ps.priority
+                  << std::setw(8)     << ps.start_time.value_or(-1)
+                  << std::setw(12)    << ps.completion_time
+                  << std::setw(12)    << ps.turnaround_time
+                  << std::setw(10)    << ps.waiting_time
+                  << std::setw(10)    << ps.response_time
                   << "\n";
     }
 

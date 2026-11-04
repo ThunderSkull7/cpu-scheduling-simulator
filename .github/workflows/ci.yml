@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Windows MSVC (${{ matrix.name }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debug
+            configure-preset: windows-msvc-debug
+            build-preset: debug
+            test-preset: debug-test
+          - name: Release
+            configure-preset: windows-msvc-release
+            build-preset: release
+            test-preset: release-test
+
+    env:
+      VCPKG_ROOT: 'C:\vcpkg'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up VCPKG_ROOT
+        run: |
+          if ($env:VCPKG_INSTALLATION_ROOT -and (Test-Path $env:VCPKG_INSTALLATION_ROOT)) {
+            "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Using VCPKG_INSTALLATION_ROOT: $env:VCPKG_INSTALLATION_ROOT"
+          } else {
+            "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Defaulting VCPKG_ROOT to C:\vcpkg"
+          }
+
+      - name: Verify Environment and Tools
+        run: |
+          Write-Host "CMake Version:"
+          cmake --version
+          Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
+          cmake --list-presets
+
+      - name: Configure CMake (${{ matrix.name }})
+        run: cmake --preset ${{ matrix.configure-preset }}
+
+      - name: Build (${{ matrix.name }})
+        run: cmake --build --preset ${{ matrix.build-preset }}
+
+      - name: Run Tests (${{ matrix.name }})
+        run: ctest --preset ${{ matrix.test-preset }} --output-on-failure
