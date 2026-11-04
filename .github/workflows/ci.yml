@@ -42,15 +42,48 @@ jobs:
             Write-Host "Defaulting VCPKG_ROOT to C:\vcpkg"
           }
 
-      - name: Verify Environment and Tools
+      - name: Detect Visual Studio Generator and Tools
         run: |
-          Write-Host "CMake Version:"
+          Write-Host "=== CMake Version ==="
           cmake --version
-          Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
+          Write-Host "=== Available CMake Presets ==="
           cmake --list-presets
 
+          # Detect installed Visual Studio generator
+          $gen = $null
+
+          # 1. Check default generator marked with '*' in cmake --help
+          $defaultMatch = (cmake --help | Select-String "^\*\s*(Visual Studio [0-9]+ [0-9]+)")
+          if ($defaultMatch) {
+              $gen = $defaultMatch.Matches[0].Groups[1].Value
+          }
+
+          # 2. If not detected via default marker, inspect installed instance via vswhere
+          if (-not $gen) {
+              $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+              if (Test-Path $vswhere) {
+                  $ver = & $vswhere -latest -prerelease -property installationVersion
+                  $major = ($ver -split '\.')[0]
+                  if ($major -eq "18") {
+                      $gen = "Visual Studio 18 2026"
+                  } elseif ($major -eq "17") {
+                      $gen = "Visual Studio 17 2022"
+                  } elseif ($major -eq "16") {
+                      $gen = "Visual Studio 16 2019"
+                  }
+              }
+          }
+
+          # 3. Fallback to Visual Studio 17 2022
+          if (-not $gen) {
+              $gen = "Visual Studio 17 2022"
+          }
+
+          Write-Host "Selected Visual Studio Generator: '$gen'"
+          "VS_GENERATOR=$gen" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Configure CMake (${{ matrix.name }})
-        run: cmake --preset ${{ matrix.configure-preset }}
+        run: cmake --preset ${{ matrix.configure-preset }} -G "$env:VS_GENERATOR" -A x64
 
       - name: Build (${{ matrix.name }})
         run: cmake --build --preset ${{ matrix.build-preset }}
