@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <map>
 #include <numeric>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -385,6 +386,44 @@ TEST(SchedulingIntegrationTest, DeterministicReproducibilityAcrossRepeatedRuns) 
     EXPECT_EQ(outcome1.value().processes(), outcome2.value().processes());
     EXPECT_EQ(outcome1.value().metrics(), outcome2.value().metrics());
     EXPECT_EQ(outcome1.value().timeline(), outcome2.value().timeline());
+}
+
+
+// ============================================================================
+// 9. Seeded generated workload invariants
+// ============================================================================
+
+TEST(SchedulingIntegrationTest, SeededGeneratedWorkloadsPreserveInvariants) {
+    // A fixed seed keeps failures reproducible while exploring many arrival,
+    // burst, and priority combinations on every CI run.
+    std::mt19937 rng(0x5EEDu);
+    std::uniform_int_distribution<int> process_count_dist(1, 20);
+    std::uniform_int_distribution<int> arrival_dist(0, 40);
+    std::uniform_int_distribution<int> burst_dist(1, 20);
+    std::uniform_int_distribution<int> priority_dist(1, 5);
+
+    for (int sample = 0; sample < 100; ++sample) {
+        SCOPED_TRACE("generated workload sample " + std::to_string(sample));
+        const int process_count = process_count_dist(rng);
+        std::vector<Process> workload;
+        workload.reserve(static_cast<std::size_t>(process_count));
+
+        for (int i = 0; i < process_count; ++i) {
+            workload.emplace_back(
+                "P" + std::to_string(i),
+                arrival_dist(rng),
+                burst_dist(rng),
+                priority_dist(rng));
+        }
+
+        auto rr = RrScheduler::run(workload, 1 + (sample % 7));
+        ASSERT_TRUE(rr.has_value());
+        verify_scheduling_invariants(workload, rr.value());
+
+        auto mlfq = MlfqScheduler::run(workload, MlfqConfig({2, 4, 8}, 17));
+        ASSERT_TRUE(mlfq.has_value());
+        verify_scheduling_invariants(workload, mlfq.value());
+    }
 }
 
 } // namespace
